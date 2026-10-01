@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101114">
+    <title>فهيم — المساعد الذكي لمدرسة خريبة السوق الثانوية الثانية للبنين</title>
+    <link rel="icon" type="image/svg+xml" href="/school-logo.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css?v=17">
+    <script src="/app.js?v=27" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar" aria-label="القائمة الجانبية">
+        <div class="sidebar-header">
+          <a class="brand" href="/" aria-label="فهيم - مساعد المدرسة">
+            <img class="brand-logo" src="/school-logo.svg" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
+            <span class="brand-copy"><strong>فهيم</strong><small>خريبة السوق الثانوية الثانية للبنين</small></span>
+          </a>
+          <button class="admin-header-button hidden" id="admin-button" type="button" aria-label="لوحة الأدمن" title="لوحة الأدمن">لوحة</button>
+          <button class="sidebar-close" id="sidebar-close" type="button" aria-label="إغلاق القائمة الجانبية">×</button>
+        </div>
+        <button class="new-chat" id="new-chat" type="button">
+          <span aria-hidden="true">＋</span> محادثة جديدة
+        </button>
+        <div class="sidebar-caption">مساحتك</div>
+        <div class="feature-list">
+          <div class="feature-item active"><span class="feature-icon">✳</span><span>محادثة ذكية</span></div>
+          <div class="feature-item"><span class="feature-icon">▧</span><span>فهم الصور</span><span class="feature-tag">رؤية</span></div>
+          <div class="feature-item"><span class="feature-icon">◖</span><span>تحدث بصوتك</span><span class="feature-tag">صوت</span></div>
+        </div>
+        <button class="help-center-button hidden" id="help-center-button" type="button">
+          <span class="feature-icon" aria-hidden="true">?</span><span>مركز المساعدة</span>
+        </button>
+        <div class="history-heading">
+          <div class="sidebar-caption history-caption">سجل المحادثات</div>
+          <button class="history-search-toggle" id="history-search-toggle" type="button" aria-label="البحث في المحادثات" aria-expanded="false" title="البحث في المحادثات">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"></circle><path d="m16 16 4.2 4.2"></path></svg>
+          </button>
+        </div>
+        <input class="history-search hidden" id="history-search" type="search" placeholder="ابحث في المحادثات..." autocomplete="off" aria-label="ابحث في عناوين المحادثات">
+        <nav class="history-list" id="history-list" aria-label="سجل المحادثات"></nav>
+        <div class="sidebar-bottom">
+          <img class="sidebar-avatar user-avatar hidden" id="user-avatar" alt="">
+          <div class="sidebar-avatar" id="user-avatar-fallback">ف</div>
+          <div class="profile-copy"><strong id="profile-name">مساحتك الخاصة</strong></div>
+          <div class="profile-settings hidden" id="profile-settings">
+            <button class="profile-settings-toggle" id="profile-settings-toggle" type="button" aria-label="إعدادات الحساب" aria-expanded="false" aria-controls="profile-settings-menu" title="إعدادات الحساب">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"></path><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"></path></svg>
+            </button>
+            <div class="profile-settings-menu hidden" id="profile-settings-menu">
+              <button class="profile-settings-action" id="change-password-button" type="button">تغيير كلمة المرور</button>
+              <button class="profile-settings-action" id="logout-button" type="button">خروج</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+      <button class="sidebar-backdrop" id="sidebar-backdrop" type="button" aria-label="إغلاق القائمة الجانبية" tabindex="-1"></button>
+
+      <section class="chat-panel" aria-label="محادثة فهيم">
+        <header class="topbar">
+          <button class="mobile-history-toggle" id="mobile-history-toggle" type="button" aria-label="عرض سجل المحادثات" aria-expanded="false">☰</button>
+          <div class="assistant-identity">
+            <img class="mini-logo" src="/school-logo.svg" alt="">
+            <div><strong>فهيم</strong><span class="model-label"><i></i> مساعدك المدرسي الذكي</span></div>
+          </div>
+          <button class="top-action" id="clear-chat" type="button" aria-label="مسح المحادثة" title="محادثة جديدة">↻</button>
+        </header>
+
+        <section class="conversation" id="conversation" aria-live="polite" aria-label="الرسائل">
+          <div class="welcome" id="welcome">
+            <img class="welcome-logo" src="/school-logo.svg" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
+            <div class="eyebrow">خريبة السوق الثانوية الثانية للبنين</div>
+            <h1>مرحبا انا فهيم<br><span>مساعدك الدراسي</span></h1>
+            <p>لطلاب خريبة السوق الثانوية الثانية للبنين.<br>اسألني عن دروسك أو أرسل صورة لمسألة، وسأشرح لك خطوة بخطوة.</p>
+            <div class="suggestions" aria-label="أسئلة مقترحة">
+              <button type="button" class="suggestion" data-prompt="ساعدني أراجع درس الرياضيات خطوة بخطوة"><span>✦</span> راجع معي درس الرياضيات</button>
+              <button type="button" class="suggestion" data-prompt="اشرح لي مفهومًا علميًا بطريقة بسيطة مع مثال"><span>↗</span> اشرح لي مفهومًا علميًا</button>
+              <button type="button" class="suggestion" data-prompt="اختبرني بأسئلة قصيرة في اللغة العربية"><span>✎</span> اختبرني في اللغة العربية</button>
+              <button type="button" class="suggestion" data-prompt="ساعدني أضع خطة مذاكرة لهذا الأسبوع"><span>⌁</span> ساعدني في تنظيم دراستي</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="composer-wrap">
+          <div class="image-preview hidden" id="image-preview">
+            <img id="preview-image" alt="معاينة الصورة المرفقة">
+            <span id="preview-name"></span>
+            <button id="remove-image" type="button" aria-label="إزالة الصورة">×</button>
+          </div>
+          <div class="file-preview hidden" id="file-preview">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2.5H6a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9.5Z"></path><path d="M13 2.5v7h7M8 14h8m-8 4h8"></path></svg>
+            <span id="file-name"></span>
+            <button id="remove-file" type="button" aria-label="إزالة الملف">×</button>
+          </div>
+          <form class="composer" id="chat-form">
+            <button class="tool-button upload-button" id="upload-button" type="button" aria-label="إرفاق صورة" title="إرفاق صورة">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="m20.5 15-5-5L5 20"></path></svg>
+            </button>
+            <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+            <button class="tool-button file-upload-button" id="file-upload-button" type="button" aria-label="إرفاق ملف" title="إرفاق ملف">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 12.5 6.8-6.8a3.5 3.5 0 0 1 5 5l-9.2 9.2a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2"></path></svg>
+            </button>
+            <input id="file-input" type="file" accept=".pdf,.txt,.md,.csv,.json,.html,.xml,application/pdf,text/plain,text/markdown,text/csv,application/json,text/html,application/xml,text/xml" hidden>
+            <textarea id="message-input" rows="1" placeholder="اكتب رسالتك هنا..." aria-label="اكتب رسالتك هنا"></textarea>
+            <button class="tool-button mic-button" id="mic-button" type="button" aria-label="تحدث مع فهيم" title="تحدث مع فهيم">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2.5" width="6" height="12" rx="3"></rect><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3.5m-4 0h8"></path></svg>
+            </button>
+            <button class="send-button" id="send-button" type="submit" aria-label="إرسال الرسالة">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-5 14-2.5-5.5L5 12Z"></path><path d="m11.5 13.5 3.5-3.5"></path></svg>
+            </button>
+          </form>
+          <div class="composer-note">قد يخطئ فهيم أحيانًا. تحقّق من المعلومات المهمة.</div>
+        </div>
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      </section>
+    </main>
+    <section class="auth-overlay" id="auth-overlay" aria-labelledby="auth-title">
+      <div class="auth-card">
+        <img class="welcome-logo" src="/school-logo.svg" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
+        <h1 id="auth-title">أهلًا بك في فهيم</h1>
+        <p id="auth-description">سجّل الدخول بحسابك للوصول إلى محادثاتك المحفوظة.</p>
+        <form class="auth-form" id="auth-form">
+          <label for="auth-email">البريد الإلكتروني</label>
+          <input id="auth-email" type="email" autocomplete="email" required maxlength="254" placeholder="name@example.com">
+          <label for="auth-password">كلمة المرور</label>
+          <div class="password-field">
+            <input id="auth-password" type="password" autocomplete="current-password" required maxlength="128" placeholder="أدخل كلمة المرور">
+            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+          </div>
+          <label class="remember-option"><input id="remember-device" type="checkbox" checked>  تذكرني  </label>
+          <button class="auth-submit" id="auth-submit" type="submit">تسجيل الدخول</button>
+        </form>
+        <button class="auth-mode-toggle forgot-link" id="forgot-password-link" type="button">نسيت كلمة المرور؟</button>
+        <button class="auth-mode-toggle" id="auth-mode-toggle" type="button">ليس لديك حساب؟ أنشئ حسابًا</button>
+        <p class="auth-error" id="auth-error" role="alert"></p>
+      </div>
+    </section>
+    <section class="auth-overlay account-overlay hidden" id="forgot-password-overlay" aria-labelledby="forgot-password-title">
+      <div class="auth-card">
+        <img class="welcome-logo" src="/school-logo.svg" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
+        <p id="forgot-password-description">أدخل بريد حسابك لنرسل إليه رمز التحقق.</p>
+        <form class="auth-form" id="forgot-password-request-form">
+          <label for="forgot-password-email">البريد الإلكتروني</label>
+          <input id="forgot-password-email" type="email" autocomplete="email" required maxlength="254" placeholder="name@example.com">
+          <button class="auth-submit" id="send-reset-code" type="submit">إرسال رمز التحقق</button>
+        </form>
+        <form class="auth-form hidden" id="forgot-password-reset-form">
+          <label for="reset-code">رمز التحقق</label>
+          <input id="reset-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required maxlength="6" placeholder="أدخل الرمز المكوّن من 6 أرقام">
+          <label for="reset-new-password">كلمة المرور الجديدة</label>
+          <div class="password-field">
+            <input id="reset-new-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+          </div>
+          <label for="reset-confirm-password">تأكيد كلمة المرور الجديدة</label>
+          <div class="password-field">
+            <input id="reset-confirm-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+          </div>
+          <button class="auth-submit" id="reset-password-submit" type="submit">تعيين كلمة المرور</button>
+          <button class="auth-mode-toggle" id="resend-reset-code" type="button">إعادة إرسال الرمز</button>
+        </form>
+        <button class="auth-mode-toggle" id="cancel-password-reset" type="button">العودة لتسجيل الدخول</button>
+        <p class="auth-error" id="forgot-password-error" role="alert"></p>
+      </div>
+    </section>
+    <section class="auth-overlay account-overlay hidden" id="password-overlay" aria-labelledby="password-title">
+      <div class="auth-card">
+        <img class="welcome-logo" src="/school-logo.svg" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
+        <h1 id="password-title">تغيير كلمة المرور</h1>
+        <p>أدخل كلمة المرور الحالية، ثم اختر كلمة مرور جديدة من 10 أحرف على الأقل.</p>
+        <form class="auth-form" id="change-password-form">
+          <label for="current-password">كلمة المرور الحالية</label>
+          <div class="password-field">
+            <input id="current-password" type="password" autocomplete="current-password" required maxlength="128">
+            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+          </div>
+          <label for="new-password">كلمة المرور الجديدة</label>
+          <div class="password-field">
+            <input id="new-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+          </div>
+          <label for="confirm-password">تأكيد كلمة المرور الجديدة</label>
+          <div class="password-field">
+            <input id="confirm-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+          </div>
+          <button class="auth-submit" id="change-password-submit" type="submit">حفظ كلمة المرور</button>
+        </form>
+        <button class="auth-mode-toggle" id="cancel-password-change" type="button">إلغاء</button>
+        <p class="auth-error" id="password-error" role="alert"></p>
+      </div>
+    </section>
+    <section class="auth-overlay account-overlay hidden" id="help-center-overlay" aria-labelledby="help-center-title">
+      <div class="auth-card help-center-card">
+        <div class="admin-heading">
+          <div>
+            <h1 id="help-center-title">مركز المساعدة</h1>
+            <p>أرسل رسالة أو شكوى، وستصل إلى فريق الأدمن.</p>
+          </div>
+          <button class="admin-close" id="close-help-center" type="button" aria-label="إغلاق مركز المساعدة">×</button>
+        </div>
+        <form class="auth-form help-center-form" id="help-center-form">
+          <label for="help-category">نوع الرسالة</label>
+          <select id="help-category" required>
+            <option value="message">رسالة</option>
+            <option value="complaint">شكوى</option>
+          </select>
+          <label for="help-content">رسالتك</label>
+          <textarea id="help-content" rows="6" maxlength="3000" required placeholder="اكتب رسالتك أو شكواك هنا..."></textarea>
+          <button class="auth-submit" id="help-submit" type="submit">إرسال إلى الأدمن</button>
+        </form>
+        <p class="auth-error" id="help-error" role="alert"></p>
+      </div>
+    </section>
+    <section class="auth-overlay account-overlay hidden" id="admin-overlay" aria-labelledby="admin-title">
+      <div class="auth-card admin-card">
+        <div class="admin-heading">
+          <div>
+            <h1 id="admin-title">لوحة الأدمن</h1>
+            <p>إدارة الحسابات وإحصاءات الموقع ورسائل المستخدمين.</p>
+          </div>
+          <button class="admin-close" id="close-admin" type="button" aria-label="إغلاق لوحة الأدمن">×</button>
+        </div>
+        <div class="admin-stats">
+          <div class="admin-stat"><strong id="admin-page-views">—</strong><span>مرات فتح الموقع</span></div>
+          <div class="admin-stat"><strong id="admin-user-count">—</strong><span>المستخدمون</span></div>
+          <div class="admin-stat"><strong id="admin-admin-count">—</strong><span>الأدمن</span></div>
+        </div>
+        <div class="admin-tabs" role="tablist" aria-label="أقسام لوحة الأدمن">
+          <button class="admin-tab active" type="button" role="tab" id="admin-users-tab" aria-selected="true" aria-controls="admin-users" data-admin-tab="users">المستخدمون</button>
+          <button class="admin-tab" type="button" role="tab" id="admin-admins-tab" aria-selected="false" aria-controls="admin-users" data-admin-tab="admins">الأدمن</button>
+          <button class="admin-tab" type="button" role="tab" id="admin-support-tab" aria-selected="false" aria-controls="admin-support-messages" data-admin-tab="support">رسائل المساعدة</button>
+        </div>
+        <div id="admin-users-view">
+        <div id="admin-user-search-panel">
+          <label class="admin-search-label" for="admin-user-search">البحث عن مستخدم بالبريد الإلكتروني</label>
+          <input class="admin-user-search" id="admin-user-search" type="search" placeholder="اكتب بريد المستخدم..." autocomplete="off">
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>الاسم</th><th>البريد الإلكتروني</th><th>تاريخ التسجيل</th><th>الإجراء</th></tr></thead>
+            <tbody id="admin-users"></tbody>
+          </table>
+          <p class="admin-empty hidden" id="admin-empty">لا توجد حسابات في هذا القسم.</p>
+          <p class="admin-empty hidden" id="admin-no-search-results">لا يوجد مستخدم يطابق البريد الإلكتروني.</p>
+        </div>
+        <p class="admin-note">يمكن إدارة صلاحيات الأدمن من قائمة المستخدمين. حساب الأدمن الأساسي محمي، وكلمات المرور لا تظهر في اللوحة.</p>
+        </div>
+        <div class="admin-support-view hidden" id="admin-support-view">
+          <div class="admin-support-list" id="admin-support-messages"></div>
+          <p class="admin-empty hidden" id="admin-support-empty">لا توجد رسائل أو شكاوى حتى الآن.</p>
+        </div>
+        <p class="auth-error" id="admin-error" role="alert"></p>
+      </div>
+      <div class="auth-card admin-password-card hidden" id="admin-password-dialog" role="dialog" aria-labelledby="admin-password-title" aria-modal="true">
+        <h2 id="admin-password-title">تعيين كلمة مرور جديدة</h2>
+        <p id="admin-password-description">عيّن كلمة مرور جديدة للمستخدم.</p>
+        <form class="auth-form" id="admin-password-form">
+          <label for="admin-new-password">كلمة المرور الجديدة</label>
+          <div class="password-field">
+            <input id="admin-new-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+          </div>
+          <label for="admin-confirm-password">تأكيد كلمة المرور الجديدة</label>
+          <div class="password-field">
+            <input id="admin-confirm-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+          </div>
+          <button class="auth-submit" id="admin-password-submit" type="submit">حفظ كلمة المرور</button>
+        </form>
+        <button class="auth-mode-toggle" id="cancel-admin-password" type="button">إلغاء</button>
+        <p class="auth-error" id="admin-password-error" role="alert"></p>
+      </div>
+    </section>
+  </body>
+</html>
