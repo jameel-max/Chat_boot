@@ -1,4 +1,12 @@
 .env
+.venv/
+.venv-1/
 __pycache__/
 *.py[cod]
 data/
+books/
+*.sqlite3
+*.db
+database_copy.txt
+files_list.txt
+structure.txt

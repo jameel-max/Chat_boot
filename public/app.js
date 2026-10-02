@@ -37,6 +37,7 @@ const logoutButton = document.querySelector("#logout-button");
 const adminButton = document.querySelector("#admin-button");
 const adminOverlay = document.querySelector("#admin-overlay");
 const adminPageViews = document.querySelector("#admin-page-views");
+const adminUniqueVisitors = document.querySelector("#admin-unique-visitors");
 const adminUserCount = document.querySelector("#admin-user-count");
 const adminAdminCount = document.querySelector("#admin-admin-count");
 const adminUsers = document.querySelector("#admin-users");
@@ -687,6 +688,7 @@ async function loadAdminDashboard() {
   try {
     const result = await apiRequest("/api/admin/dashboard");
     adminPageViews.textContent = Number(result.pageViews).toLocaleString("ar");
+    adminUniqueVisitors.textContent = Number(result.uniqueVisitors).toLocaleString("ar");
     const users = result.users.filter((user) => !user.is_admin).length;
     const admins = result.users.length - users;
     adminUserCount.textContent = users.toLocaleString("ar");
@@ -795,6 +797,12 @@ async function loadAdminDashboard() {
   } catch (error) {
     adminError.textContent = error.message;
   }
+}
+
+async function refreshAdminStatistics() {
+  const result = await apiRequest("/api/admin/statistics");
+  adminPageViews.textContent = Number(result.pageViews).toLocaleString("ar");
+  adminUniqueVisitors.textContent = Number(result.uniqueVisitors).toLocaleString("ar");
 }
 
 function closeAdminPasswordDialog() {
@@ -1486,6 +1494,13 @@ adminButton.addEventListener("click", async () => {
   setMobileMenuOpen(false);
   await loadAdminDashboard();
 });
+window.setInterval(() => {
+  if (!adminOverlay.classList.contains("hidden")) {
+    refreshAdminStatistics().catch((error) => {
+      adminError.textContent = error.message;
+    });
+  }
+}, 15000);
 adminUserSearch.addEventListener("input", filterAdminUsers);
 for (const tab of adminTabs) {
   tab.addEventListener("click", () => {

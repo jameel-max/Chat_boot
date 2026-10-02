@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/style.css?v=17">
+    <link rel="stylesheet" href="/style.css?v=18">
     <script src="/app.js?v=27" defer></script>
   </head>
   <body>
@@ -21,7 +21,7 @@
             <span class="brand-copy"><strong>فهيم</strong><small>خريبة السوق الثانوية الثانية للبنين</small></span>
           </a>
           <button class="admin-header-button hidden" id="admin-button" type="button" aria-label="لوحة الأدمن" title="لوحة الأدمن">لوحة</button>
-          <button class="sidebar-close" id="sidebar-close" type="button" aria-label="إغلاق القائمة الجانبية">×</button>
+          <button class="sidebar-close" id="sidebar-close" type="button" aria-label="إغلاق القائمة الجانبية"><img class="close-icon" src="/close.png" alt=""></button>
         </div>
         <button class="new-chat" id="new-chat" type="button">
           <span aria-hidden="true">＋</span> محادثة جديدة
@@ -33,7 +33,7 @@
           <div class="feature-item"><span class="feature-icon">◖</span><span>تحدث بصوتك</span><span class="feature-tag">صوت</span></div>
         </div>
         <button class="help-center-button hidden" id="help-center-button" type="button">
-          <span class="feature-icon" aria-hidden="true">?</span><span>مركز المساعدة</span>
+          <img class="support-icon" src="/support.png" alt=""><span>مركز المساعدة</span>
         </button>
         <div class="history-heading">
           <div class="sidebar-caption history-caption">سجل المحادثات</div>
@@ -202,7 +202,7 @@
             <h1 id="help-center-title">مركز المساعدة</h1>
             <p>أرسل رسالة أو شكوى، وستصل إلى فريق الأدمن.</p>
           </div>
-          <button class="admin-close" id="close-help-center" type="button" aria-label="إغلاق مركز المساعدة">×</button>
+          <button class="admin-close" id="close-help-center" type="button" aria-label="إغلاق مركز المساعدة"><img class="close-icon" src="/close.png" alt=""></button>
         </div>
         <form class="auth-form help-center-form" id="help-center-form">
           <label for="help-category">نوع الرسالة</label>
@@ -224,10 +224,11 @@
             <h1 id="admin-title">لوحة الأدمن</h1>
             <p>إدارة الحسابات وإحصاءات الموقع ورسائل المستخدمين.</p>
           </div>
-          <button class="admin-close" id="close-admin" type="button" aria-label="إغلاق لوحة الأدمن">×</button>
+          <button class="admin-close" id="close-admin" type="button" aria-label="إغلاق لوحة الأدمن"><img class="close-icon" src="/close.png" alt=""></button>
         </div>
         <div class="admin-stats">
           <div class="admin-stat"><strong id="admin-page-views">—</strong><span>مرات فتح الموقع</span></div>
+          <div class="admin-stat"><strong id="admin-unique-visitors">—</strong><span>الزوار الفريدون</span></div>
           <div class="admin-stat"><strong id="admin-user-count">—</strong><span>المستخدمون</span></div>
           <div class="admin-stat"><strong id="admin-admin-count">—</strong><span>الأدمن</span></div>
         </div>

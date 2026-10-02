@@ -132,7 +132,7 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn("سجّل الدخول", result["error"])
         self.mock_urlopen.assert_not_called()
 
-    def test_streams_image_and_previous_interaction_from_gemini(self):
+    def test_streams_current_image_and_database_conversation_history(self):
         self.mock_urlopen.return_value = BytesIO(
             (
                 'event: interaction.created\n'
@@ -204,10 +204,164 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn("كتلة Markdown", sent["system_instruction"])
         self.assertIn("لا تكتب وسوم HTML", sent["system_instruction"])
         self.assertIs(sent["stream"], True)
-        self.assertEqual(sent["previous_interaction_id"], "v1_previous")
-        self.assertEqual(sent["input"][0]["type"], "text")
-        self.assertEqual(sent["input"][1]["type"], "image")
-        self.assertEqual(sent["input"][1]["mime_type"], "image/png")
+        self.assertNotIn("previous_interaction_id", sent)
+        transcript = "\n".join(
+            part.get("text", "") for part in sent["input"]
+        )
+        self.assertIn("الطالب: سؤال سابق", transcript)
+        self.assertIn("فهيم: إجابة سابقة", transcript)
+        images = [part for part in sent["input"] if part["type"] == "image"]
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["mime_type"], "image/png")
+
+    def test_curriculum_context_and_verified_source_flow_through_existing_chat(self):
+        source_footer = (
+            "\n\n📚 المصدر الرسمي المسترجع:\n"
+            "- كتاب الفيزياء — الصف الثاني عشر — الفصل الأول — الوحدة الثانية "
+            "— الدرس الثالث — صفحة 47 — وزارة التربية والتعليم الأردنية"
+        )
+        curriculum_result = {
+            "searched": True,
+            "extra_parts": [
+                {"type": "text", "text": "[مقطع رسمي | صفحة 47]\nالقوة تساوي الكتلة مضروبة بالتسارع."}
+            ],
+            "system_note": "التزم بالمقطع الرسمي ولا تخترع صفحة.",
+            "answer_suffix": source_footer,
+            "sources": [{"page_number": 47}],
+            "official": True,
+        }
+        self.mock_urlopen.return_value = BytesIO(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"القوة تساوي الكتلة مضروبة بالتسارع."}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_curriculum"}}\n\n'
+            ).encode()
+        )
+
+        with patch("server.retrieve_curriculum", return_value=curriculum_result) as retrieve:
+            status, result = self.post({"message": "اشرح قانون نيوتن الثاني"})
+
+        self.assertEqual(status, 200)
+        retrieve.assert_called_once()
+        sent = json.loads(self.mock_urlopen.call_args.args[0].data)
+        self.assertIn("التزم بالمقطع الرسمي", sent["system_instruction"])
+        sent_text = "\n".join(
+            part.get("text", "") for part in sent["input"] if part["type"] == "text"
+        )
+        self.assertIn("القوة تساوي الكتلة مضروبة بالتسارع", sent_text)
+        self.assertIn("اشرح قانون نيوتن الثاني", sent_text)
+        self.assertTrue(result["answer"].endswith(source_footer))
+
+        stored = server.database.get_conversation(
+            self.user["id"], result["conversationId"]
+        )
+        self.assertIn(source_footer, stored[1][-1]["content"])
+
+    def test_curriculum_embedding_failure_does_not_use_unverified_fallback(self):
+        with patch(
+            "server.retrieve_curriculum",
+            side_effect=server.CurriculumError("embedding unavailable"),
+        ):
+            status, result = self.post({"message": "اشرح قانون نيوتن الثاني"})
+        self.assertEqual(status, 503)
+        self.assertIn("تعذّر البحث في محتوى المنهج", result["error"])
+        self.mock_urlopen.assert_not_called()
+
+    def test_curriculum_filters_using_explicit_subject_in_postgres_chat_history(self):
+        previous = server.database.prepare_user_message(
+            self.user["id"],
+            None,
+            "سؤال في الفيزياء",
+            "أنا أدرس الفيزياء في الفصل الثاني",
+            None,
+            None,
+        )
+        server.database.complete_assistant_message(
+            previous["id"], "تمام، سأشرح على هذا الأساس.", "old-interaction"
+        )
+        self.mock_urlopen.return_value = BytesIO(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"الشرح."}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_followup"}}\n\n'
+            ).encode()
+        )
+        empty_retrieval = {
+            "searched": True,
+            "extra_parts": [],
+            "system_note": "",
+            "answer_suffix": "",
+            "sources": [],
+        }
+
+        with patch(
+            "server.retrieve_curriculum", return_value=empty_retrieval
+        ) as retrieve:
+            status, _ = self.post(
+                {"message": "اشرحها", "conversationId": previous["id"]}
+            )
+
+        self.assertEqual(status, 200)
+        self.assertIsNone(retrieve.call_args.args[2])
+        kwargs = retrieve.call_args.kwargs
+        self.assertEqual(
+            kwargs["conversation_history"][0]["content"],
+            "أنا أدرس الفيزياء في الفصل الثاني",
+        )
+
+    def test_reloads_referenced_previous_image_but_skips_unrelated_images(self):
+        previous_image = b"previous-png-image"
+        previous = server.database.prepare_user_message(
+            self.user["id"],
+            None,
+            "مسألة مصورة",
+            "أوجد الناتج في الصورة",
+            "image/png",
+            previous_image,
+        )
+        server.database.complete_assistant_message(
+            previous["id"], "تظهر الصورة مسألة جمع.", "old-interaction"
+        )
+        stream = (
+            'event: step.delta\n'
+            'data: {"event_type":"step.delta","delta":{"type":"text","text":"الناتج ٤."}}\n\n'
+            'event: interaction.completed\n'
+            'data: {"event_type":"interaction.completed","interaction":{"id":"new-interaction"}}\n\n'
+        ).encode()
+        self.mock_urlopen.return_value = BytesIO(stream)
+
+        status, result = self.post(
+            {
+                "message": "ما حل المسألة الظاهرة في الصورة السابقة؟",
+                "conversationId": previous["id"],
+            }
+        )
+        self.assertEqual(status, 200)
+        request = self.mock_urlopen.call_args.args[0]
+        sent = json.loads(request.data)
+        prior_images = [
+            part for part in sent["input"] if part.get("type") == "image"
+        ]
+        self.assertEqual(len(prior_images), 1)
+        self.assertEqual(
+            base64.b64decode(prior_images[0]["data"]), previous_image
+        )
+
+        self.mock_urlopen.return_value = BytesIO(stream)
+        status, _ = self.post(
+            {
+                "message": "ما عاصمة الأردن؟",
+                "conversationId": previous["id"],
+            }
+        )
+        self.assertEqual(status, 200)
+        unrelated_request = self.mock_urlopen.call_args.args[0]
+        unrelated = json.loads(unrelated_request.data)
+        self.assertFalse(
+            any(part.get("type") == "image" for part in unrelated["input"])
+        )
 
     def test_first_response_skips_greeting_unless_student_greets(self):
         self.mock_urlopen.return_value = BytesIO(
@@ -713,10 +867,11 @@ class ChatApiTests(unittest.TestCase):
             "GET", f"/api/conversations/{record['id']}"
         )
         self.assertEqual(status, 200)
-        self.assertEqual(
-            [(message["role"], message["content"]) for message in detail["messages"]],
-            [("user", "ساعدني في العلوم"), ("assistant", "إجابة محفوظة")],
-        )
+        self.assertEqual(detail["messages"][0]["role"], "user")
+        self.assertEqual(detail["messages"][0]["content"], "ساعدني في العلوم")
+        self.assertEqual(detail["messages"][1]["role"], "assistant")
+        self.assertTrue(detail["messages"][1]["content"].startswith("إجابة محفوظة"))
+        self.assertIn("كتاب الوزارة", detail["messages"][1]["content"])
         self.assertEqual(response["conversationId"], record["id"])
 
     def test_persists_attached_image_for_history(self):
@@ -847,6 +1002,18 @@ class ChatApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 401)
         self.assertIn("غير صحيحة", result["error"])
+
+    def test_login_requests_account_creation_when_email_is_not_registered(self):
+        status, result, _ = self.request(
+            "POST",
+            "/api/auth/login",
+            {"email": "missing@example.com", "password": "incorrect-password"},
+            authorized=False,
+        )
+
+        self.assertEqual(status, 404)
+        self.assertIn("لم يتم العثور على حساب", result["error"])
+        self.assertIn("أنشئ حسابًا جديدًا", result["error"])
 
     def test_changes_password_and_invalidates_other_sessions(self):
         other_token = server.database.create_session(self.user["id"])
@@ -1004,13 +1171,19 @@ class ChatApiTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertTrue(me["isAdmin"])
 
-            with urlopen(f"{self.base_url}/") as response:
+            with urlopen(
+                Request(
+                    f"{self.base_url}/",
+                    headers={"Accept": "text/html"},
+                )
+            ) as response:
                 self.assertEqual(response.status, 200)
                 response.read()
 
             status, dashboard, _ = self.request("GET", "/api/admin/dashboard")
             self.assertEqual(status, 200)
             self.assertEqual(dashboard["pageViews"], 1)
+            self.assertEqual(dashboard["uniqueVisitors"], 1)
             self.assertEqual(len(dashboard["users"]), 2)
             self.assertTrue(
                 all(
@@ -1072,6 +1245,41 @@ class ChatApiTests(unittest.TestCase):
             self.assertEqual(status, 204)
             self.assertIsNone(server.database.get_session_user(student_token))
             self.assertIsNotNone(server.database.get_session_user(admin_token))
+
+    def test_page_views_dedupe_refreshes_and_count_new_browsers(self):
+        def open_page(path, visitor_cookie=None):
+            headers = {"Accept": "text/html"}
+            if visitor_cookie:
+                headers["Cookie"] = visitor_cookie
+            with urlopen(Request(f"{self.base_url}{path}", headers=headers)) as response:
+                self.assertEqual(response.status, 200)
+                set_cookie = response.headers.get("Set-Cookie")
+                return set_cookie.split(";", 1)[0] if set_cookie else visitor_cookie
+
+        first_browser = open_page("/")
+        self.assertIsNotNone(first_browser)
+        self.assertEqual(open_page("/?reload=1", first_browser), first_browser)
+
+        with urlopen(f"{self.base_url}/") as response:
+            self.assertEqual(response.status, 200)
+        second_browser = open_page("/?source=another-browser")
+        self.assertIsNotNone(second_browser)
+        self.assertNotEqual(first_browser, second_browser)
+        open_page("/index.html?reload=2", second_browser)
+
+        with patch.dict(server.os.environ, {"ADMIN_EMAIL": self.user["email"]}):
+            status, dashboard, _ = self.request("GET", "/api/admin/dashboard")
+            stats_status, live_statistics, _ = self.request(
+                "GET", "/api/admin/statistics"
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(dashboard["pageViews"], 2)
+        self.assertEqual(dashboard["uniqueVisitors"], 2)
+        self.assertEqual(stats_status, 200)
+        self.assertEqual(live_statistics, {
+            "pageViews": 2,
+            "uniqueVisitors": 2,
+        })
 
     def test_admin_can_grant_and_revoke_unlimited_admin_roles(self):
         primary_admin = server.database.register_user(
@@ -1241,6 +1449,155 @@ class ChatApiTests(unittest.TestCase):
             )
             self.assertEqual(status, 204)
             self.assertIsNotNone(server.database.get_session_user(secondary_session))
+
+
+class DatabaseContextTests(unittest.TestCase):
+    def test_visit_counts_are_deduplicated_and_persist_after_database_reopen(self):
+        with tempfile.TemporaryDirectory() as folder:
+            database_path = Path(folder) / "visits.sqlite3"
+            database = server.Database(database_path)
+            database.record_page_view("browser-one", now=1_000)
+            database.record_page_view("browser-one", now=1_001)
+            database.record_page_view("browser-two", now=1_002)
+            database.record_page_view("browser-one", now=1_031)
+
+            reopened = server.Database(database_path)
+            statistics = reopened.admin_dashboard()
+            self.assertEqual(statistics["pageViews"], 3)
+            self.assertEqual(statistics["uniqueVisitors"], 2)
+
+    def test_existing_page_total_survives_unique_visitor_migration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            database_path = Path(folder) / "legacy-statistics.sqlite3"
+            connection = sqlite3.connect(database_path)
+            try:
+                with connection:
+                    connection.execute(
+                        "CREATE TABLE site_statistics ("
+                        "id INTEGER PRIMARY KEY CHECK(id = 1), "
+                        "page_views INTEGER NOT NULL DEFAULT 0)"
+                    )
+                    connection.execute(
+                        "INSERT INTO site_statistics (id, page_views) VALUES (1, 7)"
+                    )
+            finally:
+                connection.close()
+
+            database = server.Database(database_path)
+            statistics = database.admin_dashboard()
+            self.assertEqual(statistics["pageViews"], 7)
+            self.assertEqual(statistics["uniqueVisitors"], 1)
+
+    def test_context_budget_keeps_newest_messages_and_request_budget_limits_images(self):
+        messages = [
+            {
+                "id": 1,
+                "role": "user",
+                "content": "ancient " * 80,
+                "image_data": None,
+            },
+            {
+                "id": 2,
+                "role": "assistant",
+                "content": "recent answer",
+                "image_data": None,
+            },
+            {
+                "id": 3,
+                "role": "user",
+                "content": "current",
+                "image_data": None,
+            },
+        ]
+        with patch.object(server, "MAX_GEMINI_CONTEXT_TOKENS", 100):
+            parts = server.build_conversation_input(
+                messages,
+                3,
+                "current",
+                [{"type": "text", "text": "current"}],
+                "system",
+            )
+        history = "\n".join(part.get("text", "") for part in parts)
+        self.assertIn("recent answer", history)
+        self.assertNotIn("ancient", history)
+
+        with patch.object(server, "MAX_GEMINI_REQUEST_BYTES", 1024):
+            selected = server.select_images_that_fit(
+                [{"id": 1, "image_size": 100, "has_image": True}],
+                [{"type": "text", "text": "current"}],
+                "system",
+            )
+        self.assertEqual(selected, [])
+
+    def test_ordered_history_images_and_ownership_survive_database_reopen(self):
+        with tempfile.TemporaryDirectory() as folder:
+            database_path = Path(folder) / "conversation.sqlite3"
+            database = server.Database(database_path)
+            user = database.register_user(
+                "history@example.com", "correct-horse-battery"
+            )
+            first = database.prepare_user_message(
+                user["id"],
+                None,
+                "مسألة بالصورة",
+                "حل السؤال في الصورة",
+                "image/png",
+                b"persisted-image-bytes",
+            )
+            database.complete_assistant_message(
+                first["id"], "أحتاج قراءة الأرقام أولًا.", "response-1"
+            )
+            second = database.prepare_user_message(
+                user["id"],
+                first["id"],
+                "مسألة بالصورة",
+                "الرقم هو ٥",
+                None,
+                None,
+            )
+            database.complete_assistant_message(
+                second["id"], "إذن الحل هو ١٠.", "response-2"
+            )
+
+            reopened = server.Database(database_path)
+            messages = reopened.get_conversation_context(user["id"], first["id"])
+            self.assertEqual(
+                [message["role"] for message in messages],
+                ["user", "assistant", "user", "assistant"],
+            )
+            self.assertEqual(
+                [message["content"] for message in messages],
+                [
+                    "حل السؤال في الصورة",
+                    "أحتاج قراءة الأرقام أولًا.",
+                    "الرقم هو ٥",
+                    "إذن الحل هو ١٠.",
+                ],
+            )
+            self.assertEqual(
+                [message["id"] for message in messages],
+                sorted(message["id"] for message in messages),
+            )
+            images = reopened.get_conversation_images(
+                user["id"], first["id"], [first["message_id"]]
+            )
+            self.assertEqual(
+                images[first["message_id"]]["image_data"],
+                b"persisted-image-bytes",
+            )
+
+            other_user = reopened.register_user(
+                "other@example.com", "correct-horse-battery"
+            )
+            self.assertIsNone(
+                reopened.get_conversation_context(other_user["id"], first["id"])
+            )
+            self.assertEqual(
+                reopened.get_conversation_images(
+                    other_user["id"], first["id"], [first["message_id"]]
+                ),
+                {},
+            )
 
 
 if __name__ == "__main__":

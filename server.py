@@ -1,11 +1,11 @@
 import base64
 import binascii
 import json
+import math
 import os
 import re
 import secrets
 import smtplib
-import sqlite3
 import ssl
 import time
 from email.message import EmailMessage
@@ -14,17 +14,24 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from http.cookies import CookieError, SimpleCookie
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+from curriculum import CurriculumError, retrieve_curriculum
 from database import Database
 
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "public"
-DATABASE_PATH = ROOT / "data" / "assistant.sqlite3"
 DEFAULT_ADMIN_EMAIL = "mstfyaysht384@gmail.com"
 API_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 MAX_REQUEST_BYTES = 12 * 1024 * 1024
+VISITOR_COOKIE_NAME = "faheem_visitor"
+VISITOR_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
+VISIT_DEDUP_SECONDS = 30
+MAX_GEMINI_REQUEST_BYTES = 19 * 1024 * 1024
+MAX_GEMINI_CONTEXT_TOKENS = 900_000
+MAX_CONTEXT_IMAGES = 32
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 MAX_TITLE_LENGTH = 80
@@ -280,7 +287,10 @@ def conversation_system_instruction(
 def get_database():
     global database
     if database is None:
-        database = Database(os.environ.get("CHAT_DATABASE_PATH", DATABASE_PATH))
+        database_url = os.environ.get("DATABASE_URL", "").strip()
+        if not database_url:
+            raise RuntimeError("Set DATABASE_URL to a PostgreSQL connection URL.")
+        database = Database(database_url)
     return database
 
 
@@ -296,6 +306,181 @@ def wants_image_generation(message):
         r"an?\s+(?:image|picture|illustration)|image|picture)",
         normalized,
     ) is not None
+
+
+def estimate_part_tokens(part):
+    if part.get("type") == "text":
+        return math.ceil(len(part.get("text", "").encode("utf-8")) / 2)
+    encoded_data = part.get("data", "")
+    byte_count = len(encoded_data) * 3 // 4
+    if part.get("type") == "document":
+        return math.ceil(byte_count / 2)
+    return max(258, math.ceil(byte_count / 32_768) * 258)
+
+
+def select_prior_images(messages, current_message):
+    images = [
+        message
+        for message in messages
+        if message["role"] == "user"
+        and (message.get("has_image") or message.get("image_data") is not None)
+    ]
+    if not images:
+        return []
+
+    normalized = current_message.casefold().translate(
+        str.maketrans("أإآ", "ااا")
+    )
+    normalized = normalized.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+    image_ordinals = {
+        "1": 1,
+        "first": 1,
+        "الاولى": 1,
+        "اولى": 1,
+        "الأولى": 1,
+        "2": 2,
+        "second": 2,
+        "الثانية": 2,
+        "ثانيه": 2,
+        "3": 3,
+        "third": 3,
+        "الثالثة": 3,
+        "ثالثه": 3,
+    }
+    ordinal_matches = re.findall(
+        r"(?:الصورة|الصوره|صورة|image|picture)\s*(?:رقم\s*)?"
+        r"(\d+|first|second|third|الأولى|الاولى|اولى|الثانية|ثانيه|"
+        r"الثالثة|ثالثه)",
+        normalized,
+    )
+    requested_ordinals = {
+        image_ordinals.get(value, int(value) if value.isdigit() else 0)
+        for value in ordinal_matches
+    }
+    if requested_ordinals:
+        return [
+            images[index - 1]
+            for index in sorted(requested_ordinals)
+            if 1 <= index <= len(images)
+        ]
+
+    if re.search(r"قارن|مقارن|الصورتين|الصور|compare|both images", normalized):
+        return images
+
+    if re.search(
+        r"صورة|الصورة|الصوره|المرفق|المرفقة|image|picture|"
+        r"هاي|هذي|هذه|هذا|هي|هو|نفسها|نفسه|زيها|مثلها|عليها|فيها|"
+        r"السابق|السابقة|قبل|كمان|it\b|this\b|that\b|same\b",
+        normalized,
+    ):
+        return [images[-1]]
+    return []
+
+
+def select_images_that_fit(images, current_parts, system_instruction):
+    base_size = len(
+        json.dumps(
+            {"input": current_parts, "system_instruction": system_instruction},
+            ensure_ascii=False,
+        ).encode("utf-8")
+    )
+    available_bytes = MAX_GEMINI_REQUEST_BYTES - base_size - 2 * 1024 * 1024
+    selected = []
+    for image in reversed(images):
+        encoded_size = math.ceil(image["image_size"] / 3) * 4 + 128
+        if len(selected) >= MAX_CONTEXT_IMAGES or encoded_size > available_bytes:
+            continue
+        selected.append(image)
+        available_bytes -= encoded_size
+    return list(reversed(selected))
+
+
+def build_conversation_input(
+    messages,
+    current_message_id,
+    current_message,
+    current_parts,
+    system_instruction,
+    extra_parts=(),
+):
+    previous_messages = [
+        message for message in messages if message["id"] < current_message_id
+    ]
+    selected_images = [
+        image
+        for image in select_prior_images(previous_messages, current_message)
+        if image.get("image_data") is not None
+    ]
+    current_tokens = sum(estimate_part_tokens(part) for part in current_parts)
+    extra_tokens = sum(estimate_part_tokens(part) for part in extra_parts)
+    image_tokens = sum(
+        estimate_part_tokens(
+            {"type": "image", "data": base64.b64encode(image["image_data"]).decode("ascii")}
+        )
+        for image in selected_images
+    )
+    available_tokens = (
+        MAX_GEMINI_CONTEXT_TOKENS
+        - math.ceil(len(system_instruction.encode("utf-8")) / 2)
+        - current_tokens
+        - extra_tokens
+        - image_tokens
+    )
+    if available_tokens < 0:
+        raise ValueError("تجاوزت الرسالة والمرفقات حد سياق Gemini.")
+
+    rendered_history = []
+    image_number = 0
+    for message in previous_messages:
+        line = f"{'الطالب' if message['role'] == 'user' else 'فهيم'}: "
+        line += message["content"] or "(رسالة بلا نص)"
+        if message.get("has_image") or message.get("image_data") is not None:
+            image_number += 1
+            line += f" [أرفق الطالب صورة سابقة رقم {image_number}]"
+        rendered_history.append((line, math.ceil(len(line.encode("utf-8")) / 2)))
+
+    history_lines = []
+    used_tokens = 0
+    for line, line_tokens in reversed(rendered_history):
+        if used_tokens + line_tokens > available_tokens:
+            break
+        history_lines.append(line)
+        used_tokens += line_tokens
+    history_lines.reverse()
+
+    history_text = ""
+    if history_lines:
+        history_text = (
+            "سجل المحادثة السابق، مرتبًا من الأقدم إلى الأحدث. "
+            "استخدمه لفهم الإشارات والضمائر والسياق:\n"
+            + "\n".join(history_lines)
+        )
+    context_parts = (
+        [{"type": "text", "text": history_text}] if history_text else []
+    )
+    for image in selected_images:
+        context_parts.extend(
+            [
+                {"type": "text", "text": "صورة سابقة أشار إليها الطالب:"},
+                {
+                    "type": "image",
+                    "mime_type": image["image_mime"],
+                    "data": base64.b64encode(image["image_data"]).decode("ascii"),
+                },
+            ]
+        )
+
+    parts = context_parts + list(extra_parts) + current_parts
+    request_size = len(
+        json.dumps(
+            {"input": parts, "system_instruction": system_instruction},
+            ensure_ascii=False,
+        ).encode("utf-8")
+    )
+    if request_size > MAX_GEMINI_REQUEST_BYTES:
+        raise ValueError("تجاوز حجم سياق المحادثة حد طلب Gemini.")
+
+    return parts
 
 
 def make_conversation_title(message, has_image):
@@ -405,9 +590,52 @@ class ChatHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
 
+    def end_headers(self):
+        visitor_token = getattr(self, "new_visitor_token", None)
+        if visitor_token:
+            cookie = (
+                f"{VISITOR_COOKIE_NAME}={visitor_token}; Path=/; "
+                f"Max-Age={VISITOR_COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax"
+            )
+            forwarded_proto = (
+                self.headers.get("X-Forwarded-Proto", "")
+                .split(",", 1)[0]
+                .strip()
+                .lower()
+            )
+            if (
+                os.environ.get("COOKIE_SECURE", "false").strip().lower() == "true"
+                or forwarded_proto == "https"
+            ):
+                cookie += "; Secure"
+            self.send_header("Set-Cookie", cookie)
+            self.new_visitor_token = None
+        super().end_headers()
+
+    def page_visitor_token(self):
+        cookies = SimpleCookie()
+        try:
+            cookies.load(self.headers.get("Cookie", ""))
+        except CookieError:
+            cookies = SimpleCookie()
+        visitor = cookies.get(VISITOR_COOKIE_NAME)
+        if visitor and re.fullmatch(r"[A-Za-z0-9_-]{40,50}", visitor.value):
+            return visitor.value
+        self.new_visitor_token = secrets.token_urlsafe(32)
+        return self.new_visitor_token
+
     def do_GET(self):
-        if self.path in {"/", "/index.html"}:
-            get_database().record_page_view()
+        page_path = urlsplit(self.path).path.rstrip("/") or "/"
+        accepts_html = "text/html" in self.headers.get("Accept", "").lower()
+        is_document = (
+            accepts_html
+            or self.headers.get("Sec-Fetch-Dest", "").lower() == "document"
+            or self.headers.get("Sec-Fetch-Mode", "").lower() == "navigate"
+        )
+        if page_path in {"/", "/index.html"} and is_document:
+            get_database().record_page_view(
+                self.page_visitor_token(), dedup_seconds=VISIT_DEDUP_SECONDS
+            )
         user = self.current_user()
         if self.path == "/api/me":
             if not user:
@@ -431,6 +659,16 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 return
             admin_email = os.environ.get("ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL).strip()
             self.send_json(get_database().admin_dashboard(admin_email))
+            return
+
+        if self.path == "/api/admin/statistics":
+            if not user:
+                self.send_unauthorized()
+                return
+            if not self.is_admin(user):
+                self.send_json({"error": "ليس لديك صلاحية لفتح لوحة التحكم."}, 403)
+                return
+            self.send_json(get_database().admin_statistics())
             return
 
         if self.path == "/api/admin/support-messages":
@@ -677,7 +915,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 mime_type if image is not None else None,
                 image_bytes if image is not None else None,
             )
-        except sqlite3.Error:
+        except Database.error_types:
             self.send_json({"error": "تعذّر حفظ الرسالة في قاعدة البيانات."}, 500)
             return
         if not stored:
@@ -693,18 +931,6 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "اسم نموذج Gemini في الإعدادات غير صالح."}, 500)
             return
 
-        request_payload = {
-            "model": model,
-            "input": current_parts,
-            "system_instruction": conversation_system_instruction(
-                first_reply=not stored["response_id"],
-                grade=student_preferences["grade"],
-                ask_grade=ask_grade,
-                user_greeted=user_starts_with_greeting(message),
-                asks_identity=user_asks_assistant_identity(message),
-            ),
-            "stream": True,
-        }
         stored["user_id"] = user["id"]
         stored["mark_grade_question_asked"] = ask_grade
         if stored["title_needs_ai"]:
@@ -726,11 +952,100 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        if stored["response_id"]:
-            request_payload["previous_interaction_id"] = stored["response_id"]
+        try:
+            context_rows = get_database().get_conversation_context(
+                user["id"], stored["id"]
+            )
+            if not context_rows:
+                self.send_json({"error": "المحادثة غير موجودة."}, 404)
+                return
+            context_messages = [dict(row) for row in context_rows]
+            previous_messages = [
+                row
+                for row in context_messages
+                if row["id"] < stored["message_id"]
+            ]
+            system_instruction = conversation_system_instruction(
+                first_reply=not any(
+                    row["role"] == "assistant" for row in previous_messages
+                ),
+                grade=student_preferences["grade"],
+                ask_grade=ask_grade,
+                user_greeted=user_starts_with_greeting(message),
+                asks_identity=user_asks_assistant_identity(message),
+            )
+            curriculum = retrieve_curriculum(
+                get_database(),
+                message.strip(),
+                student_preferences["grade"],
+                api_key,
+                conversation_history=previous_messages,
+            )
+            if curriculum["system_note"]:
+                system_instruction += " " + curriculum["system_note"]
+            relevant_images = select_prior_images(previous_messages, message)
+            selected_prior_images = select_images_that_fit(
+                relevant_images, current_parts, system_instruction
+            )
+            if len(selected_prior_images) != len(relevant_images):
+                self.send_json(
+                    {
+                        "error": (
+                            "الصور السابقة المطلوبة تتجاوز حد حجم Gemini. "
+                            "أرسل الصور المطلوبة في رسائل أقل أو اختر الصور اللازمة فقط."
+                        )
+                    },
+                    413,
+                )
+                return
+            selected_images = get_database().get_conversation_images(
+                user["id"],
+                stored["id"],
+                [image["id"] for image in selected_prior_images],
+            )
+            for context_message in context_messages:
+                selected_image = selected_images.get(context_message["id"])
+                if selected_image:
+                    context_message["image_mime"] = selected_image["image_mime"]
+                    context_message["image_data"] = selected_image["image_data"]
+                else:
+                    context_message["image_data"] = None
+        except Database.error_types:
+            self.send_json({"error": "تعذّر استرجاع سياق المحادثة من قاعدة البيانات."}, 500)
+            return
+        except CurriculumError as error:
+            self.send_json(
+                {"error": f"تعذّر البحث في محتوى المنهج الآن: {error}"},
+                503,
+            )
+            return
+
+        try:
+            request_input = build_conversation_input(
+                context_messages,
+                stored["message_id"],
+                message.strip(),
+                current_parts,
+                system_instruction,
+                extra_parts=curriculum["extra_parts"],
+            )
+        except ValueError as error:
+            self.send_json({"error": str(error)}, 413)
+            return
+        stored["curriculum"] = curriculum
+        request_payload = {
+            "model": model,
+            "input": request_input,
+            "system_instruction": system_instruction,
+            "stream": True,
+        }
+        request_data = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
+        if len(request_data) > MAX_GEMINI_REQUEST_BYTES:
+            self.send_json({"error": "تجاوز حجم السياق حد طلب Gemini."}, 413)
+            return
         request = Request(
             API_URL,
-            data=json.dumps(request_payload).encode("utf-8"),
+            data=request_data,
             headers={
                 "x-goog-api-key": api_key,
                 "Content-Type": "application/json",
@@ -1006,7 +1321,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         try:
             user = get_database().register_user(email, password)
-        except sqlite3.IntegrityError:
+        except Database.integrity_error_types:
             self.send_json(
                 {"error": "يوجد حساب مسجل بهذا البريد. سجّل الدخول بدلًا من ذلك."},
                 409,
@@ -1019,6 +1334,17 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if not values:
             return
         email, password, remember = values
+        if not get_database().user_exists(email):
+            self.send_json(
+                {
+                    "error": (
+                        "لم يتم العثور على حساب بهذا البريد الإلكتروني. "
+                        "أنشئ حسابًا جديدًا للمتابعة."
+                    )
+                },
+                404,
+            )
+            return
         user = get_database().login_user(email, password)
         if not user:
             self.send_json({"error": "البريد الإلكتروني أو كلمة المرور غير صحيحة."}, 401)
@@ -1198,7 +1524,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             message_id = get_database().create_support_message(
                 user, category, content
             )
-        except sqlite3.Error:
+        except Database.error_types:
             self.send_json(
                 {"error": "تعذّر حفظ رسالتك. حاول مرة أخرى."}, 500
             )
@@ -1326,7 +1652,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 user_id=conversation["user_id"],
                 grade_question_asked=conversation["mark_grade_question_asked"],
             )
-        except sqlite3.Error:
+        except Database.error_types:
             self.send_json({"error": "تعذّر حفظ الرد في سجل المحادثة."}, 500)
             return
 
@@ -1371,7 +1697,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
             conversation["user_id"], conversation["id"], proposed_title
         )
         if not title:
-            raise sqlite3.IntegrityError("conversation disappeared before title update")
+            raise Database.integrity_error_types[0](
+                "conversation disappeared before title update"
+            )
         conversation["title"] = title
         conversation["title_needs_ai"] = False
         return title
@@ -1421,8 +1749,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 else:
                     try:
                         previous_title = conversation["title"]
+                        model_answer = "".join(answer_parts)
                         conversation_title = self.update_ai_title(
-                            conversation, "".join(answer_parts)
+                            conversation, model_answer
                         )
                         if conversation_title != previous_title:
                             self.send_sse("title", {"title": conversation_title})
@@ -1431,6 +1760,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
                                 "title_warning",
                                 {"message": conversation["title_warning"]},
                             )
+                        answer_suffix = conversation.get("curriculum", {}).get(
+                            "answer_suffix", ""
+                        )
+                        if answer_suffix:
+                            self.send_sse("delta", {"text": answer_suffix})
+                            answer_parts.append(answer_suffix)
                         get_database().complete_assistant_message(
                             conversation["id"],
                             "".join(answer_parts),
@@ -1440,7 +1775,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                                 "mark_grade_question_asked"
                             ],
                         )
-                    except sqlite3.Error:
+                    except Database.error_types:
                         self.send_sse(
                             "error",
                             {"error": "وصل الرد لكن تعذّر حفظه في سجل المحادثة."},
@@ -1562,6 +1897,8 @@ def send_password_reset_email(recipient, code):
 
 def main():
     load_local_env()
+    if not os.environ.get("DATABASE_URL", "").strip():
+        raise SystemExit("Set DATABASE_URL to a PostgreSQL connection URL in .env.")
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8000"))
     server = ThreadingHTTPServer((host, port), ChatHandler)
