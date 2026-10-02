@@ -4,6 +4,7 @@ import io
 import json
 import math
 import re
+import requests
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -224,55 +225,8 @@ def chunk_text(
 
 
 # ============================================================
-# Local Embeddings - Sentence Transformers
+# Gemini Embeddings
 # ============================================================
-
-from sentence_transformers import SentenceTransformer
-
-
-LOCAL_EMBEDDING_MODEL = (
-    "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-)
-
-EMBEDDING_DIMENSIONS = 768
-LOCAL_EMBEDDING_BATCH_SIZE = 8
-
-_local_embedding_model = None
-
-
-def _get_local_embedding_model():
-    global _local_embedding_model
-
-    if _local_embedding_model is None:
-        print(
-            "Loading local embedding model: "
-            f"{LOCAL_EMBEDDING_MODEL}",
-            flush=True,
-        )
-
-        _local_embedding_model = SentenceTransformer(
-            LOCAL_EMBEDDING_MODEL,
-            device="cpu",
-        )
-
-        dimension = (
-            _local_embedding_model.get_sentence_embedding_dimension()
-        )
-
-        if dimension != EMBEDDING_DIMENSIONS:
-            raise CurriculumError(
-                "Local embedding model returned an unexpected "
-                f"dimension: {dimension}. "
-                f"Expected: {EMBEDDING_DIMENSIONS}."
-            )
-
-        print(
-            f"Local embedding model ready "
-            f"(dimension={dimension}).",
-            flush=True,
-        )
-
-    return _local_embedding_model
 
 
 def embed_texts(
@@ -281,10 +235,7 @@ def embed_texts(
     task_type="RETRIEVAL_DOCUMENT",
 ):
     """
-    Generate 768-dimensional embeddings locally.
-
-    api_key is intentionally accepted for backward compatibility
-    with the existing indexing code.
+    Generate embeddings using Gemini Embeddings API.
     """
 
     if not texts:
@@ -295,6 +246,11 @@ def embed_texts(
             "texts must be a list or tuple."
         )
 
+    if not api_key:
+        raise CurriculumError(
+            "Gemini API key is required for embeddings."
+        )
+
     cleaned_texts = []
 
     for text in texts:
@@ -303,57 +259,121 @@ def embed_texts(
         else:
             cleaned_texts.append(str(text))
 
-    model = _get_local_embedding_model()
-
     print(
-        f"Generating local embeddings: "
+        f"Generating Gemini embeddings: "
         f"{len(cleaned_texts)} texts",
         flush=True,
     )
 
-    try:
-        vectors = model.encode(
-            cleaned_texts,
-            batch_size=LOCAL_EMBEDDING_BATCH_SIZE,
-            normalize_embeddings=True,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-        )
-    except Exception as error:
-        raise CurriculumError(
-            f"Local embedding generation failed: {error}"
-        ) from error
+    all_embeddings = []
 
-    if len(vectors) != len(cleaned_texts):
-        raise CurriculumError(
-            "Local embedding count does not match "
-            "the number of input texts."
-        )
+    for start_index in range(
+        0,
+        len(cleaned_texts),
+        EMBEDDING_BATCH_SIZE,
+    ):
+        batch = cleaned_texts[
+            start_index:start_index + EMBEDDING_BATCH_SIZE
+        ]
 
-    embeddings = []
+        payload = {
+            "requests": [
+                {
+                    "model": f"models/{EMBEDDING_MODEL}",
+                    "content": {
+                        "parts": [
+                            {"text": text}
+                        ]
+                    },
+                    "taskType": task_type,
+                    "outputDimensionality": EMBEDDING_DIMENSIONS,
+                }
+                for text in batch
+            ]
+        }
 
-    for vector in vectors:
-        values = vector.tolist()
+        last_error = None
 
-        if len(values) != EMBEDDING_DIMENSIONS:
+        for attempt in range(EMBEDDING_MAX_RETRIES):
+            try:
+                response = requests.post(
+                    EMBEDDING_URL,
+                    params={"key": api_key},
+                    json=payload,
+                    timeout=EMBEDDING_TIMEOUT,
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    embeddings = data.get(
+                        "embeddings",
+                        [],
+                    )
+
+                    if len(embeddings) != len(batch):
+                        raise CurriculumError(
+                            "Gemini embedding count does not match "
+                            "the number of input texts."
+                        )
+
+                    for item in embeddings:
+                        values = item.get(
+                            "values",
+                            [],
+                        )
+
+                        if len(values) != EMBEDDING_DIMENSIONS:
+                            raise CurriculumError(
+                                "Gemini embedding has an unexpected "
+                                f"dimension: {len(values)}."
+                            )
+
+                        if not all(
+                            math.isfinite(float(value))
+                            for value in values
+                        ):
+                            raise CurriculumError(
+                                "Gemini embedding contains invalid values."
+                            )
+
+                        all_embeddings.append(
+                            [float(value) for value in values]
+                        )
+
+                    break
+
+                last_error = (
+                    f"HTTP {response.status_code}: "
+                    f"{response.text[:500]}"
+                )
+
+            except Exception as error:
+                last_error = str(error)
+
+            if attempt < EMBEDDING_MAX_RETRIES - 1:
+                delay = min(
+                    EMBEDDING_INITIAL_RETRY_DELAY * (2 ** attempt),
+                    EMBEDDING_MAX_RETRY_DELAY,
+                )
+
+                print(
+                    f"Gemini embedding retry "
+                    f"{attempt + 1}/{EMBEDDING_MAX_RETRIES} "
+                    f"after {delay}s...",
+                    flush=True,
+                )
+
+                time.sleep(delay)
+
+        else:
             raise CurriculumError(
-                "Local embedding has an unexpected dimension: "
-                f"{len(values)}."
+                "Gemini embedding generation failed: "
+                f"{last_error}"
             )
 
-        if not all(
-            math.isfinite(float(value))
-            for value in values
-        ):
-            raise CurriculumError(
-                "Local embedding contains invalid values."
-            )
+    return all_embeddings
 
-        embeddings.append(
-            [float(value) for value in values]
-        )
-
-    return embeddings
 
 
 def embed_page_images(
@@ -363,7 +383,7 @@ def embed_page_images(
     """
     Generate embeddings for visual curriculum pages.
 
-    The local SentenceTransformer model is text-only, so the
+    Gemini Embeddings are used for text embeddings, while the
     page's embedding_text is used for retrieval while the actual
     page image remains stored in PostgreSQL for display/retrieval.
     """
