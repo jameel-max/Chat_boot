@@ -13,3 +13,4 @@ pyasn1_modules==0.4.2
 pycparser==3.0
 requests==2.34.2
 urllib3==2.8.0
+sentence-transformers 
