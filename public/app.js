@@ -765,25 +765,58 @@ function readImageAsDataUrl(file) {
 
 async function apiRequest(url, options = {}) {
   const { suppressAuthOverlay = false, ...requestOptions } = options;
+
   const response = await fetch(url, {
     cache: "no-store",
     credentials: "same-origin",
     ...requestOptions,
   });
+
   if (!response.ok) {
     let detail = "تعذّر إكمال الطلب.";
+
     try {
-      const result = await response.json();
-      detail = result.error || detail;
+      const rawText = await response.text();
+
+      if (rawText.trim()) {
+        try {
+          const result = JSON.parse(rawText);
+          detail = result?.error || result?.message || detail;
+        } catch {
+          // الرد ليس JSON، نستخدم النص نفسه إذا كان مفيدًا
+          detail = rawText.trim().slice(0, 500) || detail;
+        }
+      } else {
+        detail = `تعذّر إكمال الطلب (HTTP ${response.status}).`;
+      }
     } catch {
       detail = `تعذّر إكمال الطلب (HTTP ${response.status}).`;
     }
-    if (response.status === 401 && !suppressAuthOverlay) showAuthOverlay(detail);
+
+    if (response.status === 401 && !suppressAuthOverlay) {
+      showAuthOverlay(detail);
+    }
+
     throw new Error(detail);
   }
-  if (response.status === 204) return null;
-  return response.json();
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const rawText = await response.text();
+
+  if (!rawText.trim()) {
+    throw new Error(`الخادم أعاد استجابة فارغة (HTTP ${response.status}).`);
+  }
+
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    throw new Error("الخادم أعاد استجابة غير صالحة بصيغة JSON.");
+  }
 }
+
 
 function showAuthOverlay(message = "") {
   if (
@@ -1141,85 +1174,171 @@ async function initializeApp() {
 
 async function sendMessage(message) {
   const text = message.trim();
-  if ((!text && !selectedImage && !selectedFile) || sendButton.disabled) return;
+
+  if ((!text && !selectedImage && !selectedFile) || sendButton.disabled) {
+    return;
+  }
 
   let image = null;
   let file = null;
   let displayedImage = null;
   let displayedFileName = null;
+
   if (selectedImage) {
     if (selectedImage.size > 8 * 1024 * 1024) {
       showToast("حجم الصورة يجب ألا يتجاوز 8 ميغابايت.");
       return;
     }
+
     const dataUrl = await readImageAsDataUrl(selectedImage);
+
     image = {
       mimeType: selectedImage.type,
       data: dataUrl.split(",", 2)[1],
     };
+
     displayedImage = dataUrl;
   }
+
   if (selectedFile) {
     if (selectedFile.size > 8 * 1024 * 1024) {
       showToast("حجم الملف يجب ألا يتجاوز 8 ميغابايت.");
       return;
     }
+
     const dataUrl = await readImageAsDataUrl(selectedFile);
+
     file = {
       name: selectedFile.name,
       mimeType: documentMimeType(selectedFile.name) || selectedFile.type,
       data: dataUrl.split(",", 2)[1],
     };
+
     displayedFileName = selectedFile.name;
   }
 
   const visibleText = displayedFileName
     ? `${text}${text ? "\n" : ""}مرفق ملف: ${displayedFileName}`
     : text;
+
   appendMessage("user", visibleText, displayedImage);
+
   removeSelectedImage();
   removeSelectedFile();
+
   input.value = "";
   input.style.height = "auto";
+
   const assistantBody = appendMessage("assistant", "");
+
   const typing = document.createElement("div");
   typing.className = "typing";
   typing.setAttribute("aria-label", "فهيم يفكر");
+
   const typingLabel = document.createElement("span");
   typingLabel.className = "typing-label";
   typingLabel.textContent = "فهيم يفكّر";
+
   typing.append(typingLabel);
+
   for (let index = 0; index < 3; index += 1) {
     typing.append(document.createElement("i"));
   }
+
   assistantBody.append(typing);
+
   const name = document.createElement("div");
   name.className = "message-name";
   name.textContent = "فهيم";
+
   const answer = document.createElement("div");
   answer.className = "message-text";
+
   setBusy(true);
 
   let refreshHistory = false;
+
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, image, file, conversationId: currentConversationId }),
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+      },
+      credentials: "same-origin",
+      cache: "no-store",
+      body: JSON.stringify({
+        message: text,
+        image,
+        file,
+        conversationId: currentConversationId,
+      }),
     });
+
+    /*
+     * /api/chat يستخدم SSE streaming وليس JSON عادي.
+     * لذلك لا نستخدم response.json() هنا.
+     */
     if (!response.ok) {
-      const result = await response.json();
-      const error = result.error || "لم ينجح إرسال الرسالة.";
-      if (response.status === 401) showAuthOverlay(error);
-      throw new Error(error);
+      let errorMessage = "لم ينجح إرسال الرسالة.";
+
+      try {
+        const rawText = await response.text();
+
+        if (rawText.trim()) {
+          try {
+            const result = JSON.parse(rawText);
+            errorMessage =
+              result?.error ||
+              result?.message ||
+              errorMessage;
+          } catch {
+            // إذا كان الرد نصًا وليس JSON
+            errorMessage = rawText.trim().slice(0, 500);
+          }
+        } else {
+          errorMessage = `فشل إرسال الرسالة (HTTP ${response.status}).`;
+        }
+      } catch {
+        errorMessage = `فشل إرسال الرسالة (HTTP ${response.status}).`;
+      }
+
+      if (response.status === 401) {
+        showAuthOverlay(errorMessage);
+      }
+
+      throw new Error(errorMessage);
     }
-    const result = await readGeminiStream(response, assistantBody, name, answer);
+
+    /*
+     * نجاح /api/chat يعني أن السيرفر بدأ SSE stream.
+     * يجب أن يكون response.body موجودًا حتى نتمكن من القراءة.
+     */
+    if (!response.body) {
+      throw new Error("الخادم بدأ الاستجابة لكن لم يرسل اتصال البث.");
+    }
+
+    const result = await readGeminiStream(
+      response,
+      assistantBody,
+      name,
+      answer,
+    );
+
     currentConversationId = result.conversationId;
     refreshHistory = true;
+
   } catch (error) {
     assistantBody.remove();
-    showToast(error instanceof Error ? error.message : "حدث خطأ غير متوقع.");
+
+    showToast(
+      error instanceof Error
+        ? error.message
+        : "حدث خطأ غير متوقع.",
+    );
+
     refreshHistory = true;
+
   } finally {
     setBusy(false);
     input.focus();
@@ -1229,7 +1348,11 @@ async function sendMessage(message) {
     try {
       await loadHistory();
     } catch (error) {
-      showToast(error.message);
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "تعذّر تحديث المحادثات.",
+      );
     }
   }
 }
