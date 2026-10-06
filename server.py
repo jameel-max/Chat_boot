@@ -128,7 +128,7 @@ GRADE_NAMES = {
 
 
 def extract_student_grade(message, allow_short_answer=False):
-    normalized = message.translate(str.maketrans("ظ ظ،ظ¢ظ£ظ¤ظ¥ظ¦ظ§ظ¨ظ©", "0123456789"))
+    normalized = message.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
     normalized = re.sub(r"[\u064b-\u065f\u0670ظ€]", "", normalized).casefold()
     grade_pattern = "|".join(
         sorted(
