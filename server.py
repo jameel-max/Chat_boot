@@ -7,6 +7,7 @@ import re
 import secrets
 import smtplib
 import ssl
+import threading
 import time
 from email.message import EmailMessage
 from email.utils import parseaddr
@@ -50,6 +51,7 @@ ALLOWED_DOCUMENT_EXTENSIONS = {
     ".pdf", ".txt", ".md", ".csv", ".json", ".html", ".xml"
 }
 database = None
+_database_lock = threading.Lock()
 SYSTEM_INSTRUCTION = (
 "أنت فهيم، مساعد ذكي وودود لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
 "تحدث مع الطالب باللهجة الأردنية الطبيعية والواضحة، وبأسلوب إنساني قريب من الطالب، "
@@ -75,10 +77,9 @@ SYSTEM_INSTRUCTION = (
 "ولا تنسب للكتاب أو المنهاج كلامًا لم تتحقق منه. "
 "ميّز بوضوح بين ما هو وارد في المنهاج وما هو شرح إضافي أو تبسيط منك. "
 
-"لا تختلق مصادر أو صفحات أو نصوصًا من الكتب، ولا تدّعي أنك تحققت من معلومة إذا لم تتحقق منها. "
-"عندما يحتاج الجواب إلى مصدر، أو يطلب الطالب مصدرًا، أضف رابطًا مباشرًا بصيغة Markdown "
-"إلى مصدر موثوق ومرتبط فعلًا بالمعلومة إذا كنت تعرف الرابط بثقة. لا تختلق روابط ولا تدّعِ "
-"أنك فتحت أو تحققت من صفحة؛ إذا لم تعرف رابطًا موثوقًا، اذكر اسم المصدر دون رابط. "
+"استخدم محتوى الكتب والمناهج المسترجع داخليًا للتحقق من الإجابة، ولا تختلق معلومة أو تنسبها إلى مرجع لم تتحقق منه. "
+"لا تعرض للطالب أسماء الكتب أو المصادر أو أرقام الصفحات أو روابطها أو قائمة مراجع، حتى إذا طلب مصادر؛ "
+"قدّم الإجابة مباشرة بالاعتماد على المحتوى المسترجع دون إظهار بياناته المرجعية. "
 "إذا أعطاك الطالب نصًا أو صورة أو معلومة، تعامل معها باعتبارها مادة مقدمة من الطالب، "
 "وحلّلها أو اشرحها دون اختلاق معلومات غير موجودة فيها. "
 "إذا كانت هناك معلومة ناقصة تمنع الوصول إلى إجابة موثوقة، وضّح ما الذي ينقص بدل التخمين. "
@@ -106,11 +107,27 @@ SYSTEM_INSTRUCTION = (
 "ولا تجمع عنصرين في السطر نفسه أو تحوّل القائمة إلى فقرة متصلة، حتى عند تنسيق نص مستخرج من صورة. "
 "للنقاط غير المرتبة، ابدأ كل عنصر بـ - أو •. "
 "للخطوات المتسلسلة، استخدم رقمًا متبوعًا بنقطة. "
+"إذا طلب الطالب إعادة تنظيم أو تنسيق معلومات سبق ذكرها، مثل: رتّبها بجدول، "
+"نظّم المعلومات بشكل جدول، اعملها جدول، أو حطّها بجدول، فارجع إلى أحدث معلومات "
+"ذات صلة في سياق المحادثة، بما فيها إجابة فهيم، وأعد تنسيق المعلومات نفسها فقط. "
+"حافظ على الموضوع والأسماء والأرقام والتفاصيل كما وردت، ولا تبدأ موضوعًا أو خطة "
+"جديدة ولا تضف معلومات لم يطلبها الطالب. إذا لم يتضمن السياق المعلومات المطلوبة، "
+"اطلب توضيحًا بدل افتراض موضوع جديد أو التخمين. "
+"استخدم الجداول عندما تكون المعلومات أوضح في صفوف وأعمدة، "
+"مثل الجداول الدراسية والخطط والمواعيد والمقارنات أو العناصر ذات الخصائص المتكررة. "
+"اعرض الجدول بعناصر HTML الهيكلية <table> و<thead> و<tbody> و<tr> و<th> و<td>، "
+"ولا تستخدم صيغة Markdown ذات | للجداول. لا تضف سمات HTML أو CSS أو JavaScript للجدول. "
+"لا تستخدم جدولًا لمجرد وجود عدة نقاط؛ فالتعريف البسيط والشرح المتصل والقصة "
+"وخطوات حل المسألة أوضح عادةً كنص أو قائمة. "
+"في الرياضيات، اعرض المعادلات والشرح الرياضي العادي كنص أو خطوات واضحة، "
+"ولا تضعهما في جدول إلا إذا كان الجدول مفيدًا فعلًا لتنظيم قيم أو مقارنتها. "
+"فضّل كتابة المعادلات بصيغ نصية بسيطة وواضحة، وتجنب LaTeX المعقد "
+"ما لم يكن عرضه مدعومًا بوضوح. "
 "استخدم **الخط العريض** للمصطلحات أو النتائج المهمة باعتدال، "
 "واستخدم ==التظليل== فقط للكلمة أو النتيجة التي تستحق إبرازًا واضحًا. "
 "اكتب الشيفرة البرمجية داخل كتلة Markdown محددة بثلاث علامات backticks، "
 "واذكر نوع اللغة بعد العلامات عند معرفته. "
-"لا تكتب وسوم HTML مثل <ol> أو <li> أو <ul> في الإجابة. "
+"لا تكتب وسوم HTML أخرى مثل <ol> أو <li> أو <ul>؛ يُسمح فقط بعناصر الجدول المذكورة. "
 "اجعل الفقرات وعناصر القوائم قصيرة ومتماسكة، ولا تحوّل كل إجابة إلى قائمة لمجرد التنظيم. "
 
 "كن صريحًا بشأن حدود معرفتك. لا تتظاهر باليقين عندما تكون المعلومة غير مؤكدة. "
@@ -287,10 +304,14 @@ def conversation_system_instruction(
 def get_database():
     global database
     if database is None:
-        database_url = os.environ.get("DATABASE_URL", "").strip()
-        if not database_url:
-            raise RuntimeError("Set DATABASE_URL to a PostgreSQL connection URL.")
-        database = Database(database_url)
+        with _database_lock:
+            if database is None:
+                database_url = os.environ.get("DATABASE_URL", "").strip()
+                if not database_url:
+                    raise RuntimeError(
+                        "Set DATABASE_URL to a PostgreSQL connection URL."
+                    )
+                database = Database(database_url)
     return database
 
 
@@ -731,6 +752,39 @@ class ChatHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
+        if self.path != "/api/chat":
+            return self._do_POST()
+
+        self._chat_perf_started = time.perf_counter()
+        self._chat_perf = {}
+        try:
+            self._do_POST()
+        finally:
+            total = time.perf_counter() - self._chat_perf_started
+            stages = (
+                "student_preferences",
+                "title_generation",
+                "prepare_user_message",
+                "conversation_context",
+                "curriculum_retrieval",
+                "conversation_images",
+                "gemini_first_byte",
+                "gemini_total",
+                "save_assistant",
+            )
+            details = " ".join(
+                f"{stage}={self._chat_perf[stage]:.3f}s"
+                if stage in self._chat_perf
+                else f"{stage}=n/a"
+                for stage in stages
+            )
+            print(f"[PERF] {details} total_request={total:.3f}s", flush=True)
+
+    def _record_chat_perf(self, stage, started):
+        if hasattr(self, "_chat_perf"):
+            self._chat_perf[stage] = time.perf_counter() - started
+
+    def _do_POST(self):
         if self.path == "/api/auth/register":
             self.register_account()
             return
@@ -875,6 +929,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
         generate_image = (
             payload.get("generateImage") is True or wants_image_generation(message)
         )
+        student_started = time.perf_counter()
         student_preferences = get_database().get_student_preferences(user["id"])
         if not student_preferences:
             self.send_json({"error": "تعذّر تحميل إعدادات حساب الطالب."}, 500)
@@ -887,13 +942,15 @@ class ChatHandler(SimpleHTTPRequestHandler):
         ):
             student_grade = extract_student_grade(message, allow_short_answer=True)
         if student_grade:
-            get_database().update_student_grade(user["id"], student_grade)
-            student_preferences = get_database().get_student_preferences(user["id"])
+            student_preferences = get_database().update_student_grade(
+                user["id"], student_grade
+            )
             if not student_preferences:
                 self.send_json(
                     {"error": "تعذّر تحميل إعدادات حساب الطالب."}, 500
                 )
                 return
+        self._record_chat_perf("student_preferences", student_started)
         ask_grade = (
             not student_preferences["grade_question_asked"]
             and student_preferences["grade"] is None
@@ -907,14 +964,21 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     part for part in (saved_message, f"مرفق ملف: {file_name}") if part
                 )
                 title_message = title_message or f"ملف {file_name}"
+            title_started = time.perf_counter()
+            local_title = make_conversation_title(
+                title_message, image is not None
+            )
+            self._record_chat_perf("title_generation", title_started)
+            prepare_started = time.perf_counter()
             stored = get_database().prepare_user_message(
                 user["id"],
                 conversation_id,
-                make_conversation_title(title_message, image is not None),
+                local_title,
                 saved_message,
                 mime_type if image is not None else None,
                 image_bytes if image is not None else None,
             )
+            self._record_chat_perf("prepare_user_message", prepare_started)
         except Database.error_types:
             self.send_json({"error": "تعذّر حفظ الرسالة في قاعدة البيانات."}, 500)
             return
@@ -953,9 +1017,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
 
         try:
+            context_started = time.perf_counter()
             context_rows = get_database().get_conversation_context(
                 user["id"], stored["id"]
             )
+            self._record_chat_perf("conversation_context", context_started)
             if not context_rows:
                 self.send_json({"error": "المحادثة غير موجودة."}, 404)
                 return
@@ -974,6 +1040,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 user_greeted=user_starts_with_greeting(message),
                 asks_identity=user_asks_assistant_identity(message),
             )
+            curriculum_started = time.perf_counter()
             curriculum = retrieve_curriculum(
                 get_database(),
                 message.strip(),
@@ -981,8 +1048,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 api_key,
                 conversation_history=previous_messages,
             )
+            self._record_chat_perf("curriculum_retrieval", curriculum_started)
             if curriculum["system_note"]:
                 system_instruction += " " + curriculum["system_note"]
+            images_started = time.perf_counter()
             relevant_images = select_prior_images(previous_messages, message)
             selected_prior_images = select_images_that_fit(
                 relevant_images, current_parts, system_instruction
@@ -1010,6 +1079,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     context_message["image_data"] = selected_image["image_data"]
                 else:
                     context_message["image_data"] = None
+            self._record_chat_perf("conversation_images", images_started)
         except Database.error_types:
             self.send_json({"error": "تعذّر استرجاع سياق المحادثة من قاعدة البيانات."}, 500)
             return
@@ -1053,6 +1123,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
             },
             method="POST",
         )
+        gemini_started = time.perf_counter()
+        stored["gemini_started_at"] = gemini_started
+        stream_started = False
         try:
             with urlopen(request, timeout=90) as response:
                 self.send_response(200)
@@ -1062,6 +1135,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_header("X-Accel-Buffering", "no")
                 self.end_headers()
                 self.close_connection = True
+                stream_started = True
                 self.send_sse(
                     "conversation",
                     {
@@ -1095,6 +1169,17 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": f"تعذّر الاتصال بخدمة Gemini: {error}"}, 502)
             return
         except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception:
+            if stream_started:
+                try:
+                    self.send_sse(
+                        "error", {"error": "تعذّر إكمال الإجابة بسبب خطأ داخلي."}
+                    )
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            else:
+                self.send_json({"error": "تعذّر بدء بث Gemini."}, 502)
             return
 
     def do_PATCH(self):
@@ -1500,9 +1585,6 @@ class ChatHandler(SimpleHTTPRequestHandler):
 
     def submit_support_message(self):
         user = self.current_user()
-        if not user:
-            self.send_unauthorized()
-            return
         payload = self.read_json_body()
         if payload is None:
             return
@@ -1520,6 +1602,26 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 {"error": "يجب ألا تتجاوز الرسالة 3000 حرف."}, 400
             )
             return
+        if not user:
+            name = payload.get("name")
+            email = payload.get("email")
+            if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
+                self.send_json({"error": "اكتب اسمًا صالحًا للتواصل."}, 400)
+                return
+            if (
+                not isinstance(email, str)
+                or len(email.strip()) > 254
+                or not re.fullmatch(
+                    r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip()
+                )
+            ):
+                self.send_json({"error": "أدخل بريدًا إلكترونيًا صالحًا."}, 400)
+                return
+            user = {
+                "id": None,
+                "name": name.strip(),
+                "email": email.strip().casefold(),
+            }
         try:
             message_id = get_database().create_support_message(
                 user, category, content
@@ -1732,10 +1834,19 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 delta = event_data.get("delta")
                 text = delta.get("text") if isinstance(delta, dict) else None
                 if isinstance(text, str) and text:
+                    if not answer_started:
+                        self._record_chat_perf(
+                            "gemini_first_byte",
+                            conversation.get("gemini_started_at", time.perf_counter()),
+                        )
                     self.send_sse("delta", {"text": text})
                     answer_parts.append(text)
                     answer_started = True
             elif event_type == "interaction.completed":
+                self._record_chat_perf(
+                    "gemini_total",
+                    conversation.get("gemini_started_at", time.perf_counter()),
+                )
                 interaction = event_data.get("interaction")
                 response_id = (
                     interaction.get("id") if isinstance(interaction, dict) else None
@@ -1748,24 +1859,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     )
                 else:
                     try:
-                        previous_title = conversation["title"]
-                        model_answer = "".join(answer_parts)
-                        conversation_title = self.update_ai_title(
-                            conversation, model_answer
-                        )
-                        if conversation_title != previous_title:
-                            self.send_sse("title", {"title": conversation_title})
-                        if conversation.get("title_warning"):
-                            self.send_sse(
-                                "title_warning",
-                                {"message": conversation["title_warning"]},
-                            )
-                        answer_suffix = conversation.get("curriculum", {}).get(
-                            "answer_suffix", ""
-                        )
-                        if answer_suffix:
-                            self.send_sse("delta", {"text": answer_suffix})
-                            answer_parts.append(answer_suffix)
+                        conversation_title = conversation["title"]
+                        save_started = time.perf_counter()
                         get_database().complete_assistant_message(
                             conversation["id"],
                             "".join(answer_parts),
@@ -1775,20 +1870,21 @@ class ChatHandler(SimpleHTTPRequestHandler):
                                 "mark_grade_question_asked"
                             ],
                         )
+                        self._record_chat_perf("save_assistant", save_started)
                     except Database.error_types:
+                        if "save_started" in locals():
+                            self._record_chat_perf("save_assistant", save_started)
                         self.send_sse(
                             "error",
                             {"error": "وصل الرد لكن تعذّر حفظه في سجل المحادثة."},
                         )
                     else:
-                        self.send_sse(
-                            "done",
-                            {
-                                "responseId": response_id,
-                                "conversationId": conversation["id"],
-                                "title": conversation_title,
-                            },
-                        )
+                        done_payload = {
+                            "responseId": response_id,
+                            "conversationId": conversation["id"],
+                            "title": conversation_title,
+                        }
+                        self.send_sse("done", done_payload)
                 completed = True
             elif event_type in {"interaction.failed", "error"}:
                 error = event_data.get("error")

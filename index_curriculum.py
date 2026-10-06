@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import traceback
 from pathlib import Path
 
 from curriculum import (
@@ -194,8 +195,52 @@ def _print_progress(database, book_id, expected):
     )
 
 
+def _print_pdf_info(pdf_path):
+    try:
+        size_bytes = pdf_path.stat().st_size
+    except OSError:
+        return
+
+    size_mb = size_bytes / (1024 * 1024)
+
+    print(
+        "=" * 60,
+        flush=True,
+    )
+
+    print(
+        f"PDF: {pdf_path.name}",
+        flush=True,
+    )
+
+    print(
+        f"حجم الملف: {size_mb:.2f} MB",
+        flush=True,
+    )
+
+    print(
+        "الحد الحالي المسموح به في curriculum.py: 200 MB",
+        flush=True,
+    )
+
+    if size_bytes > 200 * 1024 * 1024:
+        print(
+            "تحذير: حجم هذا الملف أكبر من 200 MB.",
+            flush=True,
+        )
+
+    print(
+        "=" * 60,
+        flush=True,
+    )
+
+
 def main(argv=None):
     arguments = build_parser().parse_args(argv)
+
+    # ---------------------------------------------------------
+    # التحقق من ملف PDF
+    # ---------------------------------------------------------
 
     if (
         not arguments.pdf.is_file()
@@ -207,6 +252,24 @@ def main(argv=None):
         )
         return 2
 
+    # ---------------------------------------------------------
+    # تحسين ترميز Windows
+    # ---------------------------------------------------------
+
+    try:
+        sys.stdout.reconfigure(
+            encoding="utf-8",
+            errors="replace",
+        )
+        sys.stderr.reconfigure(
+            encoding="utf-8",
+            errors="replace",
+        )
+    except AttributeError:
+        pass
+
+    _print_pdf_info(arguments.pdf)
+
     load_local_env()
 
     api_key = os.environ.get(
@@ -214,15 +277,32 @@ def main(argv=None):
         "",
     ).strip()
 
+    # ---------------------------------------------------------
+    # ملاحظة:
+    # المشروع الحالي يستخدم Local SentenceTransformer
+    # للـ embeddings، لذلك وجود GEMINI_API_KEY قد يكون
+    # مطلوبًا من بيئة المشروع، لكن لا ننشئ embeddings
+    # داخل index_pdf.
+    # ---------------------------------------------------------
+
     if not api_key:
         print(
-            "Set GEMINI_API_KEY in .env before indexing curriculum PDFs.",
+            "تحذير: GEMINI_API_KEY غير موجود في .env.",
             file=sys.stderr,
         )
-        return 2
+
+        print(
+            "سيستمر البرنامج إذا كان نظام الـ embeddings المحلي "
+            "لا يحتاج المفتاح.",
+            file=sys.stderr,
+        )
 
     try:
         database = get_database()
+
+        # -----------------------------------------------------
+        # التحقق من pgvector
+        # -----------------------------------------------------
 
         if not database.curriculum_vector_enabled:
             print(
@@ -231,6 +311,10 @@ def main(argv=None):
                 file=sys.stderr,
             )
             return 2
+
+        # -----------------------------------------------------
+        # Metadata CSV
+        # -----------------------------------------------------
 
         page_metadata = (
             page_metadata_from_csv(
@@ -246,10 +330,15 @@ def main(argv=None):
             flush=True,
         )
 
-        # مهم:
-        # لا ننشئ embeddings هنا.
-        # نستخرج الكتاب فقط ثم نعالج embeddings
-        # على batches محفوظة في PostgreSQL.
+        # -----------------------------------------------------
+        # استخراج PDF فقط
+        #
+        # مهم جدًا:
+        # embed=False
+        #
+        # حتى لا يتم إنشاء كل embeddings دفعة واحدة.
+        # -----------------------------------------------------
+
         book, pages = index_pdf(
             arguments.pdf,
             {
@@ -269,6 +358,10 @@ def main(argv=None):
             embed=False,
         )
 
+        # -----------------------------------------------------
+        # التأكد من وجود صفحات/chunks
+        # -----------------------------------------------------
+
         if not pages:
             raise CurriculumError(
                 "لم يُستخرج نص أو صفحات مصورة قابلة للفهرسة؛ "
@@ -280,16 +373,9 @@ def main(argv=None):
             for page in pages
         )
 
-        database.start_curriculum_progress(
-            book,
-            expected_chunks,
-        )
-
-        existing_ids = (
-            database.get_existing_curriculum_chunk_ids(
-                book["book_id"]
-            )
-        )
+        # -----------------------------------------------------
+        # Book ID
+        # -----------------------------------------------------
 
         print(
             "=" * 60,
@@ -302,14 +388,80 @@ def main(argv=None):
         )
 
         print(
-            f"إجمالي chunks: {expected_chunks}",
+            f"إجمالي الصفحات القابلة للفهرسة: "
+            f"{len(pages)}",
             flush=True,
         )
 
         print(
-            f"الموجود مسبقًا: {len(existing_ids)}",
+            f"إجمالي chunks المتوقع: "
+            f"{expected_chunks}",
             flush=True,
         )
+
+        # -----------------------------------------------------
+        # استرجاع الموجود من قاعدة البيانات
+        #
+        # هذا أهم جزء في الاستكمال.
+        #
+        # أي chunk موجود مسبقًا لن تتم معالجته مرة أخرى.
+        # -----------------------------------------------------
+
+        existing_ids = (
+            database.get_existing_curriculum_chunk_ids(
+                book["book_id"]
+            )
+        )
+
+        print(
+            f"الموجود مسبقًا في قاعدة البيانات: "
+            f"{len(existing_ids)}",
+            flush=True,
+        )
+
+        remaining_chunks = (
+            expected_chunks - len(existing_ids)
+        )
+
+        if remaining_chunks < 0:
+            remaining_chunks = 0
+
+        print(
+            f"المتبقي للفهرسة: "
+            f"{remaining_chunks}",
+            flush=True,
+        )
+
+        # -----------------------------------------------------
+        # إنشاء/تحديث progress
+        #
+        # يتم بعد قراءة الموجود مسبقًا حتى لا نعرض progress
+        # غير صحيح.
+        # -----------------------------------------------------
+
+        database.start_curriculum_progress(
+            book,
+            expected_chunks,
+        )
+        database.update_curriculum_progress(
+            book_id=book["book_id"],
+            expected_chunks=expected_chunks,
+            completed_chunks=len(existing_ids),
+            status=(
+                "complete"
+                if len(existing_ids) >= expected_chunks
+                else "indexing"
+            ),
+        )
+
+        _print_progress(
+            database,
+            book["book_id"],
+            expected_chunks,
+        )
+        # -----------------------------------------------------
+        # إذا كان الكتاب موجودًا بالكامل
+        # -----------------------------------------------------
 
         if len(existing_ids) >= expected_chunks:
             database.complete_curriculum_indexing(
@@ -319,7 +471,8 @@ def main(argv=None):
             )
 
             print(
-                "الكتاب موجود بالكامل في قاعدة البيانات. تخطي.",
+                "الكتاب موجود بالكامل في قاعدة البيانات. "
+                "تخطي بدون إعادة معالجة.",
                 flush=True,
             )
 
@@ -327,9 +480,9 @@ def main(argv=None):
 
         completed = len(existing_ids)
 
-        # ---------------------------------------------------------
-        # النصوص
-        # ---------------------------------------------------------
+        # =====================================================
+        # TEXT EMBEDDINGS
+        # =====================================================
 
         text_batches = curriculum_embedding_batches(
             book,
@@ -337,17 +490,27 @@ def main(argv=None):
             existing_chunk_ids=existing_ids,
         )
 
+        text_batch_count = 0
+
         for batch_number, batch in enumerate(
             text_batches,
             start=1,
         ):
+            text_batch_count += 1
+
             print(
                 f"\nText Batch #{batch_number}",
                 flush=True,
             )
 
             print(
-                f"عدد المقاطع: {len(batch)}",
+                f"عدد المقاطع في الـbatch: "
+                f"{len(batch)}",
+                flush=True,
+            )
+
+            print(
+                "إنشاء embeddings محلية...",
                 flush=True,
             )
 
@@ -356,6 +519,12 @@ def main(argv=None):
                 api_key,
                 task_type="RETRIEVAL_DOCUMENT",
             )
+
+            if len(vectors) != len(batch):
+                raise CurriculumError(
+                    "عدد embeddings الناتجة لا يساوي "
+                    "عدد المقاطع في الـbatch."
+                )
 
             for item, vector in zip(
                 batch,
@@ -388,14 +557,20 @@ def main(argv=None):
             )
 
             print(
-                f"تم حفظ الـbatch ✅ "
+                f"تم حفظ الـText batch ✅ "
                 f"{completed}/{expected_chunks}",
                 flush=True,
             )
 
-        # ---------------------------------------------------------
-        # الصور
-        # ---------------------------------------------------------
+        print(
+            f"\nإجمالي Text Batches المعالجة: "
+            f"{text_batch_count}",
+            flush=True,
+        )
+
+        # =====================================================
+        # VISUAL EMBEDDINGS
+        # =====================================================
 
         visual_batches = (
             curriculum_visual_embedding_batches(
@@ -405,17 +580,27 @@ def main(argv=None):
             )
         )
 
+        visual_batch_count = 0
+
         for batch_number, batch in enumerate(
             visual_batches,
             start=1,
         ):
+            visual_batch_count += 1
+
             print(
                 f"\nVisual Batch #{batch_number}",
                 flush=True,
             )
 
             print(
-                f"عدد الصفحات المصورة: {len(batch)}",
+                f"عدد الصفحات المصورة: "
+                f"{len(batch)}",
+                flush=True,
+            )
+
+            print(
+                "إنشاء visual embeddings محلية...",
                 flush=True,
             )
 
@@ -423,6 +608,12 @@ def main(argv=None):
                 batch,
                 api_key,
             )
+
+            if len(vectors) != len(batch):
+                raise CurriculumError(
+                    "عدد visual embeddings الناتجة "
+                    "لا يساوي عدد الصفحات في الـbatch."
+                )
 
             for item, vector in zip(
                 batch,
@@ -457,14 +648,25 @@ def main(argv=None):
             )
 
             print(
-                f"تم حفظ الـvisual batch ✅ "
+                f"تم حفظ الـVisual batch ✅ "
                 f"{completed}/{expected_chunks}",
                 flush=True,
             )
 
-        # ---------------------------------------------------------
-        # التحقق النهائي
-        # ---------------------------------------------------------
+        print(
+            f"\nإجمالي Visual Batches المعالجة: "
+            f"{visual_batch_count}",
+            flush=True,
+        )
+
+        # =====================================================
+        # FINAL VERIFICATION
+        # =====================================================
+
+        print(
+            "\nالتحقق النهائي من قاعدة البيانات...",
+            flush=True,
+        )
 
         final_ids = (
             database.get_existing_curriculum_chunk_ids(
@@ -473,6 +675,16 @@ def main(argv=None):
         )
 
         completed = len(final_ids)
+
+        print(
+            f"النتيجة النهائية: "
+            f"{completed}/{expected_chunks} chunks",
+            flush=True,
+        )
+
+        # -----------------------------------------------------
+        # الكتاب غير مكتمل
+        # -----------------------------------------------------
 
         if completed < expected_chunks:
             database.update_curriculum_progress(
@@ -489,6 +701,10 @@ def main(argv=None):
                 "شغّل الأمر مرة أخرى ليكمل من مكان التوقف."
             )
 
+        # -----------------------------------------------------
+        # الكتاب مكتمل
+        # -----------------------------------------------------
+
         database.complete_curriculum_indexing(
             book_id=book["book_id"],
             expected_chunks=expected_chunks,
@@ -496,27 +712,71 @@ def main(argv=None):
         )
 
         print()
-        print("=" * 60)
         print(
-            f"تمت فهرسة الكتاب بالكامل ✅"
+            "=" * 60,
+            flush=True,
         )
+
         print(
-            f"{book['book_title']}"
+            "تمت فهرسة الكتاب بالكامل ✅",
+            flush=True,
         )
+
         print(
-            f"{completed}/{expected_chunks} chunks"
+            f"العنوان: {book['book_title']}",
+            flush=True,
         )
-        print("=" * 60)
+
+        print(
+            f"Book ID: {book['book_id']}",
+            flush=True,
+        )
+
+        print(
+            f"تم حفظ: "
+            f"{completed}/{expected_chunks} chunks",
+            flush=True,
+        )
+
+        print(
+            "=" * 60,
+            flush=True,
+        )
 
         return 0
 
+    # =========================================================
+    # Database errors
+    # =========================================================
+
     except Database.error_types as error:
         print(
-            "Curriculum database operation failed: "
-            f"{type(error).__name__}.",
+            "=" * 60,
             file=sys.stderr,
         )
+
+        print(
+            "Curriculum database operation failed:",
+            file=sys.stderr,
+        )
+
+        print(
+            f"{type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+
+        print(
+            "=" * 60,
+            file=sys.stderr,
+        )
+
+        traceback.print_exc()
+
         return 1
+
+    # =========================================================
+    # Curriculum / file / runtime errors
+    # =========================================================
 
     except (
         CurriculumError,
@@ -525,9 +785,56 @@ def main(argv=None):
         ValueError,
     ) as error:
         print(
-            f"Curriculum indexing failed: {error}",
+            "=" * 60,
             file=sys.stderr,
         )
+
+        print(
+            "Curriculum indexing failed:",
+            file=sys.stderr,
+        )
+
+        print(
+            f"{type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+
+        print(
+            "=" * 60,
+            file=sys.stderr,
+        )
+
+        traceback.print_exc()
+
+        return 1
+
+    # =========================================================
+    # أي خطأ غير متوقع
+    # =========================================================
+
+    except Exception as error:
+        print(
+            "=" * 60,
+            file=sys.stderr,
+        )
+
+        print(
+            "Unexpected curriculum indexing error:",
+            file=sys.stderr,
+        )
+
+        print(
+            f"{type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+
+        print(
+            "=" * 60,
+            file=sys.stderr,
+        )
+
+        traceback.print_exc()
+
         return 1
 
 
@@ -535,3 +842,4 @@ if __name__ == "__main__":
     raise SystemExit(
         main()
     )
+

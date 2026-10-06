@@ -1,4 +1,5 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import json
 import sqlite3
 import tempfile
@@ -117,6 +118,21 @@ class ChatApiTests(unittest.TestCase):
         )
         return status, result
 
+    def test_database_singleton_initializes_once_for_parallel_requests(self):
+        with patch("server.database", None):
+            with patch("server.Database") as database_factory:
+                with patch.dict(server.os.environ, {"DATABASE_URL": "postgresql://test"}):
+                    with ThreadPoolExecutor(max_workers=4) as executor:
+                        instances = list(executor.map(
+                            lambda _: server.get_database(),
+                            range(8),
+                        ))
+
+        self.assertEqual(database_factory.call_count, 1)
+        self.assertTrue(
+            all(instance is database_factory.return_value for instance in instances)
+        )
+
     def test_requires_gemini_api_key(self):
         with patch.dict(server.os.environ, {"GEMINI_API_KEY": ""}):
             status, result = self.post({"message": "مرحبا"})
@@ -202,6 +218,10 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn("ولا تجمع عنصرين في السطر نفسه", sent["system_instruction"])
         self.assertIn("عناوين Markdown قصيرة وواضحة", sent["system_instruction"])
         self.assertIn("كتلة Markdown", sent["system_instruction"])
+        self.assertIn("عناصر HTML الهيكلية <table>", sent["system_instruction"])
+        self.assertIn("لا تستخدم صيغة Markdown ذات | للجداول", sent["system_instruction"])
+        self.assertIn("ولا تضعهما في جدول إلا إذا كان الجدول مفيدًا فعلًا", sent["system_instruction"])
+        self.assertIn("تجنب LaTeX المعقد", sent["system_instruction"])
         self.assertIn("لا تكتب وسوم HTML", sent["system_instruction"])
         self.assertIs(sent["stream"], True)
         self.assertNotIn("previous_interaction_id", sent)
@@ -215,19 +235,14 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual(images[0]["mime_type"], "image/png")
 
     def test_curriculum_context_and_verified_source_flow_through_existing_chat(self):
-        source_footer = (
-            "\n\n📚 المصدر الرسمي المسترجع:\n"
-            "- كتاب الفيزياء — الصف الثاني عشر — الفصل الأول — الوحدة الثانية "
-            "— الدرس الثالث — صفحة 47 — وزارة التربية والتعليم الأردنية"
-        )
         curriculum_result = {
             "searched": True,
             "extra_parts": [
                 {"type": "text", "text": "[مقطع رسمي | صفحة 47]\nالقوة تساوي الكتلة مضروبة بالتسارع."}
             ],
             "system_note": "التزم بالمقطع الرسمي ولا تخترع صفحة.",
-            "answer_suffix": source_footer,
-            "sources": [{"page_number": 47}],
+            "answer_suffix": "\n\n**المصادر:**\n[1] كتاب الفيزياء — ص. 47",
+            "sources": [{"book": "كتاب الفيزياء", "page": 47}],
             "official": True,
         }
         self.mock_urlopen.return_value = BytesIO(
@@ -251,12 +266,59 @@ class ChatApiTests(unittest.TestCase):
         )
         self.assertIn("القوة تساوي الكتلة مضروبة بالتسارع", sent_text)
         self.assertIn("اشرح قانون نيوتن الثاني", sent_text)
-        self.assertTrue(result["answer"].endswith(source_footer))
+        self.assertEqual(result["answer"], "القوة تساوي الكتلة مضروبة بالتسارع.")
+        done = next(
+            event for name, event in result["events"] if name == "done"
+        )
+        self.assertNotIn("sources", done)
 
         stored = server.database.get_conversation(
             self.user["id"], result["conversationId"]
         )
-        self.assertIn(source_footer, stored[1][-1]["content"])
+        self.assertEqual(stored[1][-1]["content"], result["answer"])
+
+    def test_table_formatting_followup_reuses_previous_schedule_context(self):
+        previous = server.database.prepare_user_message(
+            self.user["id"],
+            None,
+            "تنظيم الأيام",
+            "أريد تنظيم أيامي",
+            None,
+            None,
+        )
+        schedule = (
+            "الأحد: رياضيات وعلوم\n"
+            "الاثنين: عربي وإنجليزي\n"
+            "الثلاثاء: اجتماعيات"
+        )
+        server.database.complete_assistant_message(
+            previous["id"], schedule, "previous-schedule"
+        )
+        self.mock_urlopen.return_value = BytesIO(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"| اليوم | المواد |\\n| --- | --- |\\n| الأحد | رياضيات وعلوم |"}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_table_followup"}}\n\n'
+            ).encode()
+        )
+
+        status, _ = self.post(
+            {
+                "message": "نظم المعلومات بشكل جدول",
+                "conversationId": previous["id"],
+            }
+        )
+
+        self.assertEqual(status, 200)
+        sent = json.loads(self.mock_urlopen.call_args.args[0].data)
+        self.assertIn("أعد تنسيق المعلومات نفسها فقط", sent["system_instruction"])
+        self.assertIn("لا تبدأ موضوعًا أو خطة جديدة", sent["system_instruction"])
+        transcript = "\n".join(
+            part.get("text", "") for part in sent["input"]
+        )
+        self.assertIn("فهيم: " + schedule, transcript)
+        self.assertIn("نظم المعلومات بشكل جدول", transcript)
 
     def test_curriculum_embedding_failure_does_not_use_unverified_fallback(self):
         with patch(
@@ -571,7 +633,7 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn("أول رسالة من الطالب", request_payload["input"])
         self.assertIn("ألوانًا وأرقام أسطر", request_payload["input"])
 
-    def test_stream_response_uses_the_generated_ai_title(self):
+    def test_stream_response_keeps_local_title_without_second_gemini_request(self):
         self.title_generation.stop()
         self.mock_urlopen.return_value = BytesIO(
             (
@@ -581,19 +643,21 @@ class ChatApiTests(unittest.TestCase):
                 'data: {"event_type":"interaction.completed","interaction":{"id":"v1_title"}}\n\n'
             ).encode()
         )
+        message = "رتب النصوص والعناوين وأضف ألوانًا وأرقام أسطر للكود"
         with patch(
             "server.generate_conversation_title",
-            return_value="تنظيم النصوص والعناوين والبرمجة",
+            side_effect=AssertionError("title generation must not block chat"),
         ) as title_generator:
             status, result = self.post(
-                {"message": "رتب النصوص والعناوين وأضف ألوانًا وأرقام أسطر للكود"}
+                {"message": message}
             )
-        title_generator.assert_called_once()
+        title_generator.assert_not_called()
         self.assertEqual(status, 200)
-        self.assertEqual(result["title"], "تنظيم النصوص والعناوين والبرمجة")
+        self.assertEqual(result["title"], server.make_conversation_title(message, False))
+        self.assertEqual(self.mock_urlopen.call_count, 1)
         self.assertEqual(
             server.database.list_conversations(self.user["id"])[0]["title"],
-            "تنظيم النصوص والعناوين والبرمجة",
+            server.make_conversation_title(message, False),
         )
 
     def test_conversation_titles_are_unique_after_creation_and_rename(self):
@@ -803,6 +867,47 @@ class ChatApiTests(unittest.TestCase):
             {"category": "other", "content": "رسالة"},
         )
         self.assertEqual(status, 400)
+
+    def test_logged_out_user_can_send_help_request_with_contact_details(self):
+        status, result, _ = self.request(
+            "POST",
+            "/api/support-messages",
+            {
+                "category": "message",
+                "content": "أحتاج مساعدة في الدخول إلى حسابي.",
+                "name": "طالب فهيم",
+                "email": "student@example.com",
+            },
+            authorized=False,
+        )
+
+        self.assertEqual(status, 201)
+        self.assertGreater(result["id"], 0)
+        messages = server.database.list_support_messages()
+        self.assertEqual(messages[0]["user_name"], "طالب فهيم")
+        self.assertEqual(messages[0]["user_email"], "student@example.com")
+        with server.database.connect() as connection:
+            owner = connection.execute(
+                "SELECT user_id FROM support_messages WHERE id = ?",
+                (result["id"],),
+            ).fetchone()
+        self.assertIsNone(owner["user_id"])
+
+    def test_logged_out_help_request_requires_valid_email(self):
+        status, result, _ = self.request(
+            "POST",
+            "/api/support-messages",
+            {
+                "category": "message",
+                "content": "أحتاج مساعدة.",
+                "name": "طالب فهيم",
+                "email": "invalid-email",
+            },
+            authorized=False,
+        )
+
+        self.assertEqual(status, 400)
+        self.assertIn("بريدًا إلكترونيًا صالحًا", result["error"])
         status, result, _ = self.request(
             "POST",
             "/api/support-messages",
@@ -857,6 +962,8 @@ class ChatApiTests(unittest.TestCase):
         )
         status, response = self.post({"message": "ساعدني في العلوم"})
         self.assertEqual(status, 200)
+        done = next(event for name, event in response["events"] if name == "done")
+        self.assertNotIn("sources", done)
 
         status, history, _ = self.request("GET", "/api/conversations")
         self.assertEqual(status, 200)
@@ -870,8 +977,7 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual(detail["messages"][0]["role"], "user")
         self.assertEqual(detail["messages"][0]["content"], "ساعدني في العلوم")
         self.assertEqual(detail["messages"][1]["role"], "assistant")
-        self.assertTrue(detail["messages"][1]["content"].startswith("إجابة محفوظة"))
-        self.assertIn("كتاب الوزارة", detail["messages"][1]["content"])
+        self.assertEqual(detail["messages"][1]["content"], "إجابة محفوظة")
         self.assertEqual(response["conversationId"], record["id"])
 
     def test_persists_attached_image_for_history(self):

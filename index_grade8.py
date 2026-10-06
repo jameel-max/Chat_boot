@@ -2,6 +2,10 @@ import subprocess
 from pathlib import Path
 
 
+# ============================================================
+# SETTINGS
+# ============================================================
+
 ROOT = Path(
     r"C:\python projects\ai\books\الصف_الثامن"
 )
@@ -10,12 +14,20 @@ PYTHON = Path(
     r"C:\python projects\ai\.venv-1\Scripts\python.exe"
 )
 
+PROJECT_ROOT = Path(
+    r"C:\python projects\ai"
+)
+
 SOURCE = "المركز الوطني لتطوير المناهج"
 
 SOURCE_URL = (
     "https://nccd.gov.jo/Ar/Pages/textbooks"
 )
 
+
+# ============================================================
+# SUBJECTS
+# ============================================================
 
 SUBJECTS = [
     (
@@ -53,7 +65,15 @@ SUBJECTS = [
 ]
 
 
+# ============================================================
+# HELPERS
+# ============================================================
+
 def get_subject(filename):
+    """
+    تحديد المادة اعتمادًا على اسم ملف PDF.
+    """
+
     for subject, keywords in SUBJECTS:
         for keyword in keywords:
             if keyword in filename:
@@ -65,6 +85,10 @@ def get_subject(filename):
 
 
 def get_semester(path):
+    """
+    تحديد الفصل الدراسي من مسار/اسم الملف.
+    """
+
     path_text = str(path)
 
     if "الفصل_الأول" in path_text:
@@ -78,27 +102,62 @@ def get_semester(path):
     )
 
 
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
+
+    # --------------------------------------------------------
+    # CHECK PATHS
+    # --------------------------------------------------------
+
     if not ROOT.exists():
         raise RuntimeError(
-            f"مجلد الكتب غير موجود: {ROOT}"
+            f"مجلد الكتب غير موجود:\n{ROOT}"
         )
 
     if not PYTHON.exists():
         raise RuntimeError(
-            f"Python غير موجود في المسار: {PYTHON}"
+            f"Python غير موجود في المسار:\n{PYTHON}"
         )
+
+    index_script = PROJECT_ROOT / "index_curriculum.py"
+
+    if not index_script.exists():
+        raise RuntimeError(
+            f"ملف index_curriculum.py غير موجود:\n{index_script}"
+        )
+
+    # --------------------------------------------------------
+    # FIND PDF FILES
+    # --------------------------------------------------------
 
     files = sorted(
         ROOT.rglob("*.pdf")
     )
 
-    print("=" * 60)
+    print("=" * 70)
     print("فهرسة مناهج الصف الثامن")
+    print("=" * 70)
+
     print(
         f"عدد ملفات PDF: {len(files)}"
     )
-    print("=" * 60)
+
+    print(
+        f"مجلد الكتب: {ROOT}"
+    )
+
+    print(
+        f"Python: {PYTHON}"
+    )
+
+    print("=" * 70)
+
+    # --------------------------------------------------------
+    # EXPECTED NUMBER OF BOOKS
+    # --------------------------------------------------------
 
     if len(files) != 20:
         raise RuntimeError(
@@ -106,15 +165,25 @@ def main():
             f"لكن تم العثور على {len(files)}"
         )
 
+    # --------------------------------------------------------
+    # COUNTERS
+    # --------------------------------------------------------
+
     successful = 0
-    skipped_or_resumed = 0
     failed = []
 
-    for number, pdf in enumerate(
-        files,
-        1,
-    ):
+    # --------------------------------------------------------
+    # PROCESS BOOKS
+    # --------------------------------------------------------
+
+    for number, pdf in enumerate(files, 1):
+
+        # ====================================================
+        # DETERMINE SUBJECT + SEMESTER
+        # ====================================================
+
         try:
+
             subject = get_subject(
                 pdf.name
             )
@@ -124,17 +193,27 @@ def main():
             )
 
         except Exception as error:
+
             print()
-            print("=" * 60)
+            print("=" * 70)
             print(
                 f"[{number}/20] خطأ في معلومات الكتاب"
             )
-            print(pdf.name)
-            print(error)
+            print("=" * 70)
+
+            print(
+                f"الملف: {pdf.name}"
+            )
+
+            print(
+                f"الخطأ: {error}"
+            )
+
             print(
                 "سيتم الانتقال للكتاب التالي."
             )
-            print("=" * 60)
+
+            print("=" * 70)
 
             failed.append(
                 (
@@ -145,55 +224,105 @@ def main():
 
             continue
 
+        # ====================================================
+        # BOOK HEADER
+        # ====================================================
+
         print()
-        print("=" * 60)
+        print("=" * 70)
+
         print(
             f"[{number}/20] {pdf.name}"
         )
+
         print(
             f"المادة: {subject}"
         )
+
         print(
             f"الفصل: {semester}"
         )
+
         print(
             "الحالة: فحص/استكمال الفهرسة..."
         )
-        print("=" * 60)
+
+        print("=" * 70)
+
+        # ====================================================
+        # BUILD COMMAND
+        # ====================================================
 
         command = [
             str(PYTHON),
-            "index_curriculum.py",
+
+            str(index_script),
+
             "--pdf",
             str(pdf),
+
             "--grade",
             "الثامن",
+
             "--subject",
             subject,
+
             "--semester",
             semester,
+
             "--book-title",
             pdf.name,
+
             "--source",
             SOURCE,
+
             "--source-url",
             SOURCE_URL,
+
             "--official",
         ]
 
+        # ====================================================
+        # RUN INDEXING
+        # ====================================================
+
         try:
+
             result = subprocess.run(
                 command,
-                cwd=Path(
-                    r"C:\python projects\ai"
-                ),
+                cwd=PROJECT_ROOT,
+
+                # التقاط مخرجات البرنامج
+                capture_output=True,
+
+                # تحويل المخرجات إلى نص
+                text=True,
+
+                # دعم العربية
+                encoding="utf-8",
+
+                # منع توقف السكربت بسبب مشكلة encoding
+                errors="replace",
             )
 
         except Exception as error:
+
             print()
+            print("=" * 70)
             print(
-                f"تعذر تشغيل الفهرسة: {error}"
+                "تعذر تشغيل الفهرسة"
             )
+            print("=" * 70)
+
+            print(
+                f"الكتاب: {pdf.name}"
+            )
+
+            print(
+                f"الخطأ: {error}"
+            )
+
+            print("=" * 70)
 
             failed.append(
                 (
@@ -204,7 +333,36 @@ def main():
 
             continue
 
+        # ====================================================
+        # SHOW NORMAL OUTPUT
+        # ====================================================
+
+        if result.stdout:
+
+            print()
+            print("----- مخرجات index_curriculum.py -----")
+            print(
+                result.stdout
+            )
+
+        # ====================================================
+        # SHOW ERROR OUTPUT
+        # ====================================================
+
+        if result.stderr:
+
+            print()
+            print("----- ERROR / STDERR -----")
+            print(
+                result.stderr
+            )
+
+        # ====================================================
+        # RESULT
+        # ====================================================
+
         if result.returncode == 0:
+
             successful += 1
 
             print()
@@ -214,58 +372,152 @@ def main():
             )
 
         else:
+
+            # ------------------------------------------------
+            # SAVE ERROR DETAILS
+            # ------------------------------------------------
+
+            error_details = (
+                f"exit code {result.returncode}"
+            )
+
+            if result.stderr:
+                error_details += (
+                    "\n"
+                    + result.stderr.strip()
+                )
+
             failed.append(
                 (
                     pdf.name,
-                    f"exit code {result.returncode}",
+                    error_details,
                 )
             )
 
+            # ------------------------------------------------
+            # DISPLAY FAILURE
+            # ------------------------------------------------
+
             print()
+            print("=" * 70)
+
             print(
-                f"فشلت فهرسة هذا الكتاب ❌: "
-                f"{pdf.name}"
+                f"فشلت فهرسة هذا الكتاب ❌"
             )
+
+            print(
+                f"الكتاب: {pdf.name}"
+            )
+
+            print(
+                f"Exit code: {result.returncode}"
+            )
+
+            print()
+
+            if result.stderr:
+
+                print(
+                    "الخطأ الحقيقي:"
+                )
+
+                print(
+                    result.stderr
+                )
+
+            else:
+
+                print(
+                    "لم يتم إرسال رسالة خطأ إلى STDERR."
+                )
 
             print(
                 "سيتم الانتقال للكتاب التالي "
                 "بدون إعادة الكتب السابقة."
             )
 
+            print("=" * 70)
+
+    # ========================================================
+    # FINAL REPORT
+    # ========================================================
+
     print()
-    print("=" * 60)
+    print("=" * 70)
     print("انتهت جولة فهرسة الصف الثامن.")
+    print("=" * 70)
+
     print(
         f"إجمالي ملفات PDF: {len(files)}"
     )
+
     print(
         f"كتب انتهت/تمت معالجتها: {successful}"
     )
+
     print(
         f"كتب فشلت في هذه الجولة: {len(failed)}"
     )
 
+    # ========================================================
+    # FAILED BOOKS
+    # ========================================================
+
     if failed:
-        print()
-        print("الكتب التي تحتاج إعادة تشغيل:")
-        for filename, reason in failed:
-            print(
-                f"- {filename} ({reason})"
-            )
 
         print()
         print(
-            "شغّل index_grade8.py مرة أخرى؛ "
-            "الكتب والـchunks المحفوظة لن تُعاد."
+            "الكتب التي تحتاج مراجعة:"
         )
+
+        print("-" * 70)
+
+        for filename, reason in failed:
+
+            print()
+            print(
+                f"📕 {filename}"
+            )
+
+            print(
+                f"السبب:"
+            )
+
+            print(
+                reason
+            )
+
+            print("-" * 70)
+
+        print()
+        print(
+            "ملاحظة:"
+        )
+
+        print(
+            "الكتب والـchunks التي تم حفظها مسبقًا "
+            "لن تتم إعادة فهرستها إذا كان "
+            "index_curriculum.py يدعم الاستكمال."
+        )
+
+    # ========================================================
+    # ALL SUCCESS
+    # ========================================================
+
     else:
+
         print()
         print(
             "جميع الكتب عولجت بنجاح ✅"
         )
 
-    print("=" * 60)
+    print()
+    print("=" * 70)
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()

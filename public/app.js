@@ -22,9 +22,17 @@ const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
 const mobileMenuToggle = document.querySelector("#mobile-history-toggle");
 const helpCenterButton = document.querySelector("#help-center-button");
 const helpCenterOverlay = document.querySelector("#help-center-overlay");
+const helpCenterCard = document.querySelector(".help-center-card");
 const helpCenterForm = document.querySelector("#help-center-form");
+const helpCenterDescription = document.querySelector("#help-center-description");
+const helpGuestFields = document.querySelector("#help-guest-fields");
+const helpGuestName = document.querySelector("#help-guest-name");
+const helpGuestEmail = document.querySelector("#help-guest-email");
+const helpCenterTitle = document.querySelector("#help-center-title");
+const helpCategoryField = document.querySelector("#help-category-field");
 const helpCategory = document.querySelector("#help-category");
 const helpContent = document.querySelector("#help-content");
+const helpContentLabel = document.querySelector("#help-content-label");
 const helpSubmit = document.querySelector("#help-submit");
 const helpError = document.querySelector("#help-error");
 const profileName = document.querySelector("#profile-name");
@@ -67,18 +75,6 @@ const confirmPasswordInput = document.querySelector("#confirm-password");
 const changePasswordSubmit = document.querySelector("#change-password-submit");
 const passwordError = document.querySelector("#password-error");
 const forgotPasswordLink = document.querySelector("#forgot-password-link");
-const forgotPasswordOverlay = document.querySelector("#forgot-password-overlay");
-const forgotPasswordDescription = document.querySelector("#forgot-password-description");
-const forgotPasswordRequestForm = document.querySelector("#forgot-password-request-form");
-const forgotPasswordEmail = document.querySelector("#forgot-password-email");
-const sendResetCodeButton = document.querySelector("#send-reset-code");
-const forgotPasswordResetForm = document.querySelector("#forgot-password-reset-form");
-const resetCodeInput = document.querySelector("#reset-code");
-const resetNewPasswordInput = document.querySelector("#reset-new-password");
-const resetConfirmPasswordInput = document.querySelector("#reset-confirm-password");
-const resetPasswordSubmit = document.querySelector("#reset-password-submit");
-const resendResetCodeButton = document.querySelector("#resend-reset-code");
-const forgotPasswordError = document.querySelector("#forgot-password-error");
 const authForm = document.querySelector("#auth-form");
 const authEmail = document.querySelector("#auth-email");
 const authPassword = document.querySelector("#auth-password");
@@ -248,6 +244,56 @@ function setBusy(busy) {
   sendButton.setAttribute("aria-busy", String(busy));
 }
 
+function parseMarkdownTableRow(line) {
+  if (typeof line !== "string" || !line.includes("|")) return null;
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function isMarkdownTableDivider(line, columnCount) {
+  const cells = parseMarkdownTableRow(line);
+  return cells?.length === columnCount
+    && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function createSafeTable(markup) {
+  const parsed = new DOMParser().parseFromString(markup, "text/html");
+  const sourceTable = parsed.body.querySelector("table");
+  const sourceRows = sourceTable ? [...sourceTable.rows] : [];
+  if (!sourceRows.length) return null;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "faheem-table-wrap";
+  const table = document.createElement("table");
+  table.className = "faheem-table";
+  table.dir = "rtl";
+  const head = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  for (const sourceCell of sourceRows[0].cells) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    appendInlineMarkdown(cell, sourceCell.textContent.trim());
+    headerRow.append(cell);
+  }
+  head.append(headerRow);
+  table.append(head);
+
+  const body = document.createElement("tbody");
+  for (const sourceRow of sourceRows.slice(1)) {
+    const row = document.createElement("tr");
+    for (const sourceCell of sourceRow.cells) {
+      const cell = document.createElement("td");
+      appendInlineMarkdown(cell, sourceCell.textContent.trim());
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(body);
+  wrapper.append(table);
+  return wrapper;
+}
+
 function renderMarkdown(element, text) {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   element.replaceChildren();
@@ -300,7 +346,8 @@ function renderMarkdown(element, text) {
     fenceLength = 0;
   }
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     const trimmed = line.trim();
     if (codeLines !== null) {
       const closingFence = new RegExp(
@@ -325,6 +372,68 @@ function renderMarkdown(element, text) {
     if (!trimmed) {
       flushParagraph();
       flushList();
+      continue;
+    }
+
+    if (/^<table\b/i.test(trimmed)) {
+      let tableEnd = lineIndex;
+      while (tableEnd < lines.length && !/<\/table\s*>/i.test(lines[tableEnd])) {
+        tableEnd += 1;
+      }
+      if (tableEnd < lines.length) {
+        flushParagraph();
+        flushList();
+        const safeTable = createSafeTable(
+          lines.slice(lineIndex, tableEnd + 1).join("\n"),
+        );
+        if (safeTable) element.append(safeTable);
+        lineIndex = tableEnd;
+        continue;
+      }
+    }
+
+    const tableHeaders = parseMarkdownTableRow(trimmed);
+    if (
+      tableHeaders?.length > 1
+      && isMarkdownTableDivider(lines[lineIndex + 1], tableHeaders.length)
+    ) {
+      flushParagraph();
+      flushList();
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "faheem-table-wrap";
+      const table = document.createElement("table");
+      table.className = "faheem-table";
+      table.dir = "rtl";
+      const head = document.createElement("thead");
+      const headerRow = document.createElement("tr");
+      for (const title of tableHeaders) {
+        const cell = document.createElement("th");
+        cell.scope = "col";
+        appendInlineMarkdown(cell, title);
+        headerRow.append(cell);
+      }
+      head.append(headerRow);
+      table.append(head);
+
+      const body = document.createElement("tbody");
+      let rowIndex = lineIndex + 2;
+      while (rowIndex < lines.length) {
+        const cells = parseMarkdownTableRow(lines[rowIndex]);
+        if (!cells || cells.length !== tableHeaders.length) break;
+        const row = document.createElement("tr");
+        for (const value of cells) {
+          const cell = document.createElement("td");
+          appendInlineMarkdown(cell, value);
+          row.append(cell);
+        }
+        body.append(row);
+        rowIndex += 1;
+      }
+      table.append(body);
+      wrapper.append(table);
+      element.append(wrapper);
+      lineIndex = rowIndex - 1;
       continue;
     }
 
@@ -561,11 +670,24 @@ async function readGeminiStream(response, assistantBody, name, answer) {
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
       lines.forEach(processLine);
+      if (streamComplete) {
+        try {
+          await reader.cancel();
+        } catch {
+        }
+        break;
+      }
       if (done) break;
     }
     if (buffer) processLine(buffer);
     processLine("");
   } finally {
+    if (!streamComplete) {
+      try {
+        await reader.cancel();
+      } catch {
+      }
+    }
     reader.releaseLock();
   }
 
@@ -574,7 +696,12 @@ async function readGeminiStream(response, assistantBody, name, answer) {
   }
   renderMarkdown(answer, answerText);
   scrollToLatest();
-  return { answer: answerText, responseId, conversationId, title: conversationTitle };
+  return {
+    answer: answerText,
+    responseId,
+    conversationId,
+    title: conversationTitle,
+  };
 }
 
 function setSelectedImage(file) {
@@ -637,10 +764,11 @@ function readImageAsDataUrl(file) {
 }
 
 async function apiRequest(url, options = {}) {
+  const { suppressAuthOverlay = false, ...requestOptions } = options;
   const response = await fetch(url, {
     cache: "no-store",
     credentials: "same-origin",
-    ...options,
+    ...requestOptions,
   });
   if (!response.ok) {
     let detail = "تعذّر إكمال الطلب.";
@@ -650,7 +778,7 @@ async function apiRequest(url, options = {}) {
     } catch {
       detail = `تعذّر إكمال الطلب (HTTP ${response.status}).`;
     }
-    if (response.status === 401) showAuthOverlay(detail);
+    if (response.status === 401 && !suppressAuthOverlay) showAuthOverlay(detail);
     throw new Error(detail);
   }
   if (response.status === 204) return null;
@@ -658,6 +786,13 @@ async function apiRequest(url, options = {}) {
 }
 
 function showAuthOverlay(message = "") {
+  if (
+    !helpCenterOverlay.classList.contains("hidden") &&
+    !helpGuestFields.classList.contains("hidden")
+  ) {
+    authError.textContent = "";
+    return;
+  }
   authError.textContent = message;
   authOverlay.classList.remove("hidden");
 }
@@ -996,7 +1131,7 @@ function setAuthMode(mode) {
 
 async function initializeApp() {
   try {
-    const result = await apiRequest("/api/me");
+    const result = await apiRequest("/api/me", { suppressAuthOverlay: true });
     setAuthenticated(result.user, result.isAdmin, result.isPrimaryAdmin);
     await loadHistory();
   } catch (error) {
@@ -1065,6 +1200,7 @@ async function sendMessage(message) {
   answer.className = "message-text";
   setBusy(true);
 
+  let refreshHistory = false;
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -1079,18 +1215,22 @@ async function sendMessage(message) {
     }
     const result = await readGeminiStream(response, assistantBody, name, answer);
     currentConversationId = result.conversationId;
-    await loadHistory();
+    refreshHistory = true;
   } catch (error) {
     assistantBody.remove();
     showToast(error instanceof Error ? error.message : "حدث خطأ غير متوقع.");
-    try {
-      await loadHistory();
-    } catch (historyError) {
-      showToast(historyError.message);
-    }
+    refreshHistory = true;
   } finally {
     setBusy(false);
     input.focus();
+  }
+
+  if (refreshHistory) {
+    try {
+      await loadHistory();
+    } catch (error) {
+      showToast(error.message);
+    }
   }
 }
 
@@ -1223,53 +1363,9 @@ function closePasswordOverlay() {
   passwordError.textContent = "";
 }
 
-function closeForgotPasswordOverlay() {
-  forgotPasswordOverlay.classList.add("hidden");
-  forgotPasswordRequestForm.reset();
-  forgotPasswordResetForm.reset();
-  forgotPasswordRequestForm.classList.remove("hidden");
-  forgotPasswordResetForm.classList.add("hidden");
-  forgotPasswordDescription.textContent = "أدخل بريد حسابك لنرسل إليه رمز التحقق.";
-  forgotPasswordError.textContent = "";
-}
-
-async function requestPasswordResetCode() {
-  forgotPasswordError.textContent = "";
-  sendResetCodeButton.disabled = true;
-  resendResetCodeButton.disabled = true;
-  try {
-    await apiRequest("/api/auth/forgot-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: forgotPasswordEmail.value }),
-    });
-    forgotPasswordRequestForm.classList.add("hidden");
-    forgotPasswordResetForm.classList.remove("hidden");
-    forgotPasswordDescription.textContent =
-      "إذا كان البريد مرتبطًا بحساب، فسيصلك رمز صالح لمدة 10 دقائق. افحص البريد الوارد والرسائل غير المرغوب فيها.";
-    resetCodeInput.focus();
-  } catch (error) {
-    forgotPasswordError.textContent = error.message;
-  } finally {
-    sendResetCodeButton.disabled = false;
-    resendResetCodeButton.disabled = false;
-  }
-}
-
 forgotPasswordLink.addEventListener("click", () => {
-  forgotPasswordEmail.value = authEmail.value.trim();
-  forgotPasswordError.textContent = "";
-  forgotPasswordOverlay.classList.remove("hidden");
-  forgotPasswordEmail.focus();
-});
-document.querySelector("#cancel-password-reset").addEventListener("click", closeForgotPasswordOverlay);
-forgotPasswordOverlay.addEventListener("click", (event) => {
-  if (event.target === forgotPasswordOverlay) closeForgotPasswordOverlay();
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !forgotPasswordOverlay.classList.contains("hidden")) {
-    closeForgotPasswordOverlay();
-  }
+  helpGuestEmail.value = authEmail.value.trim();
+  openHelpCenter({ guest: true });
 });
 document.querySelectorAll(".password-toggle").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1283,47 +1379,6 @@ document.querySelectorAll(".password-toggle").forEach((button) => {
     button.setAttribute("aria-pressed", String(isVisible));
   });
 });
-forgotPasswordRequestForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!forgotPasswordRequestForm.reportValidity()) return;
-  await requestPasswordResetCode();
-});
-resendResetCodeButton.addEventListener("click", requestPasswordResetCode);
-forgotPasswordResetForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!forgotPasswordResetForm.reportValidity()) return;
-  forgotPasswordError.textContent = "";
-  if (resetNewPasswordInput.value !== resetConfirmPasswordInput.value) {
-    forgotPasswordError.textContent = "كلمتا المرور الجديدتان غير متطابقتين.";
-    resetConfirmPasswordInput.focus();
-    return;
-  }
-
-  resetPasswordSubmit.disabled = true;
-  try {
-    await apiRequest("/api/auth/reset-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: forgotPasswordEmail.value,
-        code: resetCodeInput.value,
-        newPassword: resetNewPasswordInput.value,
-      }),
-    });
-    const email = forgotPasswordEmail.value;
-    closeForgotPasswordOverlay();
-    authEmail.value = email;
-    authPassword.value = "";
-    setAuthMode("login");
-    showToast("تم تغيير كلمة المرور. سجّل الدخول بكلمة المرور الجديدة.");
-    authPassword.focus();
-  } catch (error) {
-    forgotPasswordError.textContent = error.message;
-  } finally {
-    resetPasswordSubmit.disabled = false;
-  }
-});
-
 changePasswordButton.addEventListener("click", () => {
   setProfileSettingsOpen(false);
   passwordError.textContent = "";
@@ -1332,17 +1387,43 @@ changePasswordButton.addEventListener("click", () => {
 });
 
 function closeHelpCenter() {
+  const returnToLogin =
+    helpCenterCard.classList.contains("guest-help-card") && !currentUser;
   helpCenterOverlay.classList.add("hidden");
   helpError.textContent = "";
   helpCenterForm.reset();
+  if (returnToLogin) authOverlay.classList.remove("hidden");
 }
 
-helpCenterButton.addEventListener("click", () => {
+function openHelpCenter({ guest = !currentUser } = {}) {
   setMobileMenuOpen(false);
   helpError.textContent = "";
+  if (guest) {
+    authError.textContent = "";
+    authOverlay.classList.add("hidden");
+  }
+  helpCenterCard.classList.toggle("guest-help-card", guest);
+  helpGuestFields.classList.toggle("hidden", !guest);
+  helpGuestName.disabled = !guest;
+  helpGuestName.required = guest;
+  helpGuestEmail.disabled = !guest;
+  helpGuestEmail.required = guest;
+  helpCenterTitle.textContent = guest ? "استعادة الوصول إلى الحساب" : "مركز المساعدة";
+  helpCategoryField.classList.toggle("hidden", guest);
+  helpCategory.value = "message";
+  helpContentLabel.textContent = guest ? "تفاصيل المشكلة" : "رسالتك";
+  helpContent.placeholder = guest
+    ? "اذكر ما يحدث عند محاولة الدخول إلى حسابك..."
+    : "اكتب رسالتك أو شكواك هنا...";
+  helpSubmit.textContent = guest ? "إرسال طلب المساعدة" : "إرسال إلى الأدمن";
+  helpCenterDescription.textContent = guest
+    ? "أرسل تفاصيل المشكلة وسيتواصل معك فريق المساعدة عبر بريدك الإلكتروني."
+    : "أرسل رسالة أو شكوى، وستصل إلى فريق الأدمن.";
   helpCenterOverlay.classList.remove("hidden");
-  helpContent.focus();
-});
+  (guest ? helpGuestName : helpContent).focus();
+}
+
+helpCenterButton.addEventListener("click", () => openHelpCenter({ guest: false }));
 document.querySelector("#close-help-center").addEventListener("click", closeHelpCenter);
 helpCenterOverlay.addEventListener("click", (event) => {
   if (event.target === helpCenterOverlay) closeHelpCenter();
@@ -1357,17 +1438,26 @@ helpCenterForm.addEventListener("submit", async (event) => {
   if (!helpCenterForm.reportValidity()) return;
   helpError.textContent = "";
   helpSubmit.disabled = true;
+  const guestRequest = !helpGuestFields.classList.contains("hidden");
   try {
     await apiRequest("/api/support-messages", {
+      suppressAuthOverlay: guestRequest,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         category: helpCategory.value,
         content: helpContent.value,
+        ...(helpGuestFields.classList.contains("hidden")
+          ? {}
+          : { name: helpGuestName.value, email: helpGuestEmail.value }),
       }),
     });
     closeHelpCenter();
-    showToast("وصلت رسالتك إلى فريق الأدمن. شكرًا لملاحظتك.");
+    showToast(
+      guestRequest
+        ? "وصل طلبك لفريق المساعدة، وسنتواصل معك عبر البريد."
+        : "وصلت رسالتك إلى فريق الأدمن. شكرًا لملاحظتك.",
+    );
   } catch (error) {
     helpError.textContent = error.message;
   } finally {

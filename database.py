@@ -47,7 +47,7 @@ class Database:
     error_types = DATABASE_ERROR_TYPES
     integrity_error_types = DATABASE_INTEGRITY_ERROR_TYPES
 
-    def __init__(self, path):
+    def __init__(self, path, initialize_schema=True):
         self.curriculum_vector_enabled = False
 
         self.is_postgres = isinstance(path, str) and path.startswith(
@@ -63,6 +63,9 @@ class Database:
         else:
             self.path = Path(path)
             self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not initialize_schema:
+            return
 
         with self.connect() as connection:
             schema = """
@@ -117,6 +120,17 @@ class Database:
                     last_seen_at INTEGER NOT NULL,
                     last_counted_at INTEGER NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS site_visit_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    visitor_hash TEXT NOT NULL
+                        REFERENCES site_visitors(visitor_hash)
+                        ON DELETE CASCADE,
+                    visited_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS site_visit_events_time_idx
+                    ON site_visit_events(visited_at);
 
                 CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY,
@@ -885,6 +899,15 @@ class Database:
                 ),
             )
 
+            if count_visit:
+                connection.execute(
+                    """
+                    INSERT INTO site_visit_events (visitor_hash, visited_at)
+                    VALUES (?, ?)
+                    """,
+                    (visitor_hash, now),
+                )
+
     def admin_dashboard(self, primary_admin_email=""):
         with self.connect() as connection:
             users = connection.execute(
@@ -1443,115 +1466,230 @@ class Database:
             for value in embedding
         ) + "]"
 
-        conditions = []
-        parameters = []
-
-        if official_only is not None:
-            conditions.append(
-                "books.is_official = ?"
-            )
-            parameters.append(official_only)
-
-        if grade:
-            conditions.append(
-                "books.grade = ?"
-            )
-            parameters.append(grade)
-
-        if subject:
-            conditions.append(
-                "books.subject = ?"
-            )
-            parameters.append(subject)
-
-        if semester:
-            conditions.append(
-                "books.semester = ?"
-            )
-            parameters.append(semester)
-
-        if unit:
-            conditions.append(
-                "pages.unit ILIKE ?"
-            )
-            parameters.append(
-                f"%{unit}%"
-            )
-
-        if lesson:
-            conditions.append(
-                "pages.lesson ILIKE ?"
-            )
-            parameters.append(
-                f"%{lesson}%"
-            )
-
-        where_clause = (
-            " AND ".join(conditions)
-            or "TRUE"
-        )
-
         limit = max(
             1,
             min(int(limit), 20),
         )
 
-        query_parameters = [
-            vector,
-            *parameters,
-            vector,
-            limit,
-        ]
+        # ------------------------------------------------------------
+        # Build filter sets from strictest to most flexible.
+        #
+        # This prevents a missing lesson/unit metadata value from
+        # causing the entire curriculum search to return zero results.
+        # ------------------------------------------------------------
+
+        filter_sets = []
+
+        # 1. Exact metadata: grade + subject + semester + unit + lesson
+        filter_sets.append(
+            {
+                "grade": grade,
+                "subject": subject,
+                "semester": semester,
+                "unit": unit,
+                "lesson": lesson,
+            }
+        )
+
+        # 2. Remove lesson
+        if lesson:
+            filter_sets.append(
+                {
+                    "grade": grade,
+                    "subject": subject,
+                    "semester": semester,
+                    "unit": unit,
+                    "lesson": None,
+                }
+            )
+
+        # 3. Remove unit
+        if unit:
+            filter_sets.append(
+                {
+                    "grade": grade,
+                    "subject": subject,
+                    "semester": semester,
+                    "unit": None,
+                    "lesson": None,
+                }
+            )
+
+        # 4. Remove semester
+        if semester:
+            filter_sets.append(
+                {
+                    "grade": grade,
+                    "subject": subject,
+                    "semester": None,
+                    "unit": None,
+                    "lesson": None,
+                }
+            )
+
+        # 5. Keep grade + subject only
+        filter_sets.append(
+            {
+                "grade": grade,
+                "subject": subject,
+                "semester": None,
+                "unit": None,
+                "lesson": None,
+            }
+        )
+
+        # Remove duplicate filter combinations
+        unique_filter_sets = []
+        seen = set()
+
+        for filters in filter_sets:
+            key = (
+                filters["grade"],
+                filters["subject"],
+                filters["semester"],
+                filters["unit"],
+                filters["lesson"],
+            )
+
+            if key not in seen:
+                seen.add(key)
+                unique_filter_sets.append(filters)
 
         with self.connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT
-                    chunks.chunk_id,
-                    chunks.content,
 
-                    1 - (
-                        chunks.embedding <=> ?::vector
-                    ) AS similarity,
+            for filters in unique_filter_sets:
+                conditions = []
+                parameters = []
 
-                    books.book_id,
-                    books.grade,
-                    books.subject,
-                    books.semester,
-                    books.book_title,
-                    books.edition,
-                    books.source,
-                    books.source_url,
-                    books.is_official,
+                # ----------------------------------------------------
+                # Official source
+                # ----------------------------------------------------
+                if official_only is not None:
+                    conditions.append(
+                        "books.is_official = ?"
+                    )
+                    parameters.append(
+                        official_only
+                    )
 
-                    pages.page_id,
-                    pages.page_number,
-                    pages.unit,
-                    pages.lesson,
-                    pages.page_image_data,
-                    pages.page_image_mime
+                # ----------------------------------------------------
+                # Grade
+                # ----------------------------------------------------
+                if filters["grade"]:
+                    conditions.append(
+                        "books.grade = ?"
+                    )
+                    parameters.append(
+                        filters["grade"]
+                    )
 
-                FROM curriculum_chunks AS chunks
+                # ----------------------------------------------------
+                # Subject
+                # ----------------------------------------------------
+                if filters["subject"]:
+                    conditions.append(
+                        "books.subject = ?"
+                    )
+                    parameters.append(
+                        filters["subject"]
+                    )
 
-                JOIN curriculum_books AS books
-                    ON books.book_id = chunks.book_id
+                # ----------------------------------------------------
+                # Semester
+                # ----------------------------------------------------
+                if filters["semester"]:
+                    conditions.append(
+                        "books.semester = ?"
+                    )
+                    parameters.append(
+                        filters["semester"]
+                    )
 
-                JOIN curriculum_pages AS pages
-                    ON pages.page_id = chunks.page_id
+                # ----------------------------------------------------
+                # Unit
+                # ----------------------------------------------------
+                if filters["unit"]:
+                    conditions.append(
+                        "pages.unit ILIKE ?"
+                    )
+                    parameters.append(
+                        f"%{filters['unit']}%"
+                    )
 
-                WHERE {where_clause}
+                # ----------------------------------------------------
+                # Lesson
+                # ----------------------------------------------------
+                if filters["lesson"]:
+                    conditions.append(
+                        "pages.lesson ILIKE ?"
+                    )
+                    parameters.append(
+                        f"%{filters['lesson']}%"
+                    )
 
-                ORDER BY chunks.embedding <=> ?::vector
+                where_clause = (
+                    " AND ".join(conditions)
+                    or "TRUE"
+                )
 
-                LIMIT ?
-                """,
-                query_parameters,
-            ).fetchall()
+                query_parameters = [
+                    vector,
+                    *parameters,
+                    vector,
+                    limit,
+                ]
 
-        return [
-            dict(row)
-            for row in rows
-        ]
+                rows = connection.execute(
+                    f"""
+                    SELECT
+                        chunks.chunk_id,
+                        chunks.content,
+
+                        1 - (
+                            chunks.embedding <=> ?::vector
+                        ) AS similarity,
+
+                        books.book_id,
+                        books.grade,
+                        books.subject,
+                        books.semester,
+                        books.book_title,
+                        books.edition,
+                        books.source,
+                        books.source_url,
+                        books.is_official,
+
+                        pages.page_id,
+                        pages.page_number,
+                        pages.unit,
+                        pages.lesson,
+                        pages.page_image_data,
+                        pages.page_image_mime
+
+                    FROM curriculum_chunks AS chunks
+
+                    JOIN curriculum_books AS books
+                        ON books.book_id = chunks.book_id
+
+                    JOIN curriculum_pages AS pages
+                        ON pages.page_id = chunks.page_id
+
+                    WHERE {where_clause}
+
+                    ORDER BY chunks.embedding <=> ?::vector
+
+                    LIMIT ?
+                    """,
+                    query_parameters,
+                ).fetchall()
+
+                if rows:
+                    return [
+                        dict(row)
+                        for row in rows
+                    ]
+
+        return []
 
     # ============================================================
     # SUPPORT / ADMIN
@@ -1885,18 +2023,27 @@ class Database:
         grade,
     ):
         with self.connect() as connection:
-            connection.execute(
+            row = connection.execute(
                 """
                 UPDATE users
                 SET grade = ?,
                     grade_question_asked = 1
                 WHERE id = ?
+                RETURNING grade, grade_question_asked
                 """,
                 (
                     grade,
                     user_id,
                 ),
-            )
+            ).fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "grade": row["grade"],
+            "grade_question_asked": bool(row["grade_question_asked"]),
+        }
 
     # ============================================================
     # SESSIONS
@@ -2007,9 +2154,9 @@ class Database:
 
     @staticmethod
     def is_placeholder_title(title):
-        return title == "ظ…ط­ط§ط¯ط«ط© ط¬ط¯ظٹط¯ط©" or (
+        return title == "محادثة جديدة" or (
             title.startswith(
-                "ظ…ط­ط§ط¯ط«ط© ط¬ط¯ظٹط¯ط© ("
+                "محادثة جديدة ("
             )
             and title.endswith(")")
         )
@@ -2023,7 +2170,7 @@ class Database:
     ):
         base_title = (
             " ".join(title.split())[:80].rstrip()
-            or "ظ…ط­ط§ط¯ط«ط© ط¬ط¯ظٹط¯ط©"
+            or "محادثة جديدة"
         )
 
         candidate = base_title
@@ -2079,6 +2226,7 @@ class Database:
 
             title_source = ""
             title_needs_ai = False
+            is_new_conversation = not conversation_id
 
             if conversation_id:
                 conversation = connection.execute(
@@ -2205,17 +2353,18 @@ class Database:
 
             message_id = inserted_message.fetchone()["id"]
 
-            connection.execute(
-                """
-                UPDATE conversations
-                SET updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    now,
-                    conversation_id,
-                ),
-            )
+            if not is_new_conversation:
+                connection.execute(
+                    """
+                    UPDATE conversations
+                    SET updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        now,
+                        conversation_id,
+                    ),
+                )
 
         return {
             "id": conversation_id,

@@ -136,6 +136,11 @@ button { color: inherit; }
 .message-text h3 { font-size: 1.17em; }
 .message-text h4 { font-size: 1.07em; }
 .message-text h1:first-child, .message-text h2:first-child, .message-text h3:first-child, .message-text h4:first-child { margin-top: 0; }
+.message-text .faheem-table-wrap { max-width: 100%; margin: .8em 0; overflow-x: auto; border: none; outline: none; box-shadow: none; }
+.message-text .faheem-table, .message-text .faheem-table tr, .message-text .faheem-table th, .message-text .faheem-table td { border: none; outline: none; box-shadow: none; }
+.message-text .faheem-table { width: 100%; min-width: 360px; border-collapse: collapse; line-height: 1.65; }
+.message-text .faheem-table th, .message-text .faheem-table td { padding: 8px 12px; text-align: right; vertical-align: top; }
+.message-text .faheem-table th { background: #22231e; color: #f0efe9; font-weight: 700; }
 .message-text strong { color: #f0efdf; font-weight: 700; }
 .message-text ul, .message-text ol { margin-block: .7em; }
 .message-text mark { padding: 0 .2em; border-radius: 3px; background: #65d6c435; color: #a8f0e4; }
@@ -174,7 +179,19 @@ button { color: inherit; }
 .auth-card { display: flex; width: min(100%, 420px); flex-direction: column; align-items: center; padding: 35px 28px; border: 1px solid #34353b; border-radius: 18px; background: #17181c; text-align: center; box-shadow: 0 24px 80px #0008; }
 .admin-card { width: min(100%, 900px); max-height: min(90vh, 780px); align-items: stretch; overflow: hidden; text-align: right; }
 .help-center-card { width: min(100%, 480px); align-items: stretch; text-align: right; }
+.help-center-card.guest-help-card { padding: 27px 25px; border-color: color-mix(in srgb, var(--border), var(--accent) 14%); border-radius: 16px; background: var(--panel); box-shadow: 0 22px 64px #0007; }
+.guest-help-card .admin-heading { align-items: center; margin-bottom: 15px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
+.guest-help-card .admin-heading h1 { margin-bottom: 5px; font-size: 21px; }
+.guest-help-card .admin-heading p { margin: 0; max-width: 38ch; color: var(--muted); font-size: 12px; line-height: 1.8; }
 .help-center-form { width: 100%; }
+.help-center-card .help-center-form { width: 100%; max-width: none; }
+.help-center-form > div:not(.password-field) { display: grid; gap: 7px; }
+.help-center-form > div:not(.password-field) + label { margin-top: 5px; }
+.help-guest-fields { display: grid; gap: 7px; margin-bottom: 4px; }
+.help-guest-fields label { margin-top: 3px; color: #d1d0d5; font-size: 11px; }
+.help-guest-fields label + input { margin-bottom: 5px; }
+.help-guest-fields input { width: 100%; min-width: 0; min-height: 43px; padding: 0 12px; border: 1px solid #38393f; border-radius: 9px; outline: none; background: #111216; color: var(--text); font: inherit; font-size: 12px; }
+.help-guest-fields input:focus { border-color: #66877e; box-shadow: 0 0 0 3px #65d6c414; }
 .help-center-form select, .help-center-form textarea { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid #38393f; border-radius: 9px; outline: none; background: #111216; color: var(--text); font: inherit; font-size: 12px; }
 .help-center-form select { min-height: 43px; }
 .help-center-form textarea { min-height: 130px; resize: vertical; line-height: 1.8; }
@@ -267,6 +284,7 @@ button { color: inherit; }
   .suggestions { gap: 7px; margin-top: 24px; }
   .suggestion { min-height: 48px; padding: 0 9px; font-size: 10px; }
   .admin-card { padding: 22px 16px; }
+  .help-center-card.guest-help-card { max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 22px 18px; }
   .admin-table { min-width: 620px; }
   .admin-stats { gap: 8px; }
   .admin-stat { min-width: 0; flex: 1 1 calc(50% - 8px); padding: 10px; }

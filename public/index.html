@@ -9,8 +9,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/style.css?v=18">
-    <script src="/app.js?v=27" defer></script>
+    <link rel="stylesheet" href="/style.css?v=23">
+    <script src="/app.js?v=38" defer></script>
   </head>
   <body>
     <main class="app-shell">
@@ -139,35 +139,6 @@
         <p class="auth-error" id="auth-error" role="alert"></p>
       </div>
     </section>
-    <section class="auth-overlay account-overlay hidden" id="forgot-password-overlay" aria-labelledby="forgot-password-title">
-      <div class="auth-card">
-        <img class="welcome-logo" src="/school-logo.svg" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
-        <p id="forgot-password-description">أدخل بريد حسابك لنرسل إليه رمز التحقق.</p>
-        <form class="auth-form" id="forgot-password-request-form">
-          <label for="forgot-password-email">البريد الإلكتروني</label>
-          <input id="forgot-password-email" type="email" autocomplete="email" required maxlength="254" placeholder="name@example.com">
-          <button class="auth-submit" id="send-reset-code" type="submit">إرسال رمز التحقق</button>
-        </form>
-        <form class="auth-form hidden" id="forgot-password-reset-form">
-          <label for="reset-code">رمز التحقق</label>
-          <input id="reset-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required maxlength="6" placeholder="أدخل الرمز المكوّن من 6 أرقام">
-          <label for="reset-new-password">كلمة المرور الجديدة</label>
-          <div class="password-field">
-            <input id="reset-new-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
-            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
-          </div>
-          <label for="reset-confirm-password">تأكيد كلمة المرور الجديدة</label>
-          <div class="password-field">
-            <input id="reset-confirm-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
-            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
-          </div>
-          <button class="auth-submit" id="reset-password-submit" type="submit">تعيين كلمة المرور</button>
-          <button class="auth-mode-toggle" id="resend-reset-code" type="button">إعادة إرسال الرمز</button>
-        </form>
-        <button class="auth-mode-toggle" id="cancel-password-reset" type="button">العودة لتسجيل الدخول</button>
-        <p class="auth-error" id="forgot-password-error" role="alert"></p>
-      </div>
-    </section>
     <section class="auth-overlay account-overlay hidden" id="password-overlay" aria-labelledby="password-title">
       <div class="auth-card">
         <img class="welcome-logo" src="/school-logo.svg" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
@@ -200,17 +171,25 @@
         <div class="admin-heading">
           <div>
             <h1 id="help-center-title">مركز المساعدة</h1>
-            <p>أرسل رسالة أو شكوى، وستصل إلى فريق الأدمن.</p>
+            <p id="help-center-description">أرسل رسالة أو شكوى، وستصل إلى فريق الأدمن.</p>
           </div>
           <button class="admin-close" id="close-help-center" type="button" aria-label="إغلاق مركز المساعدة"><img class="close-icon" src="/close.png" alt=""></button>
         </div>
         <form class="auth-form help-center-form" id="help-center-form">
-          <label for="help-category">نوع الرسالة</label>
-          <select id="help-category" required>
-            <option value="message">رسالة</option>
-            <option value="complaint">شكوى</option>
-          </select>
-          <label for="help-content">رسالتك</label>
+          <div id="help-guest-fields" class="help-guest-fields hidden">
+            <label for="help-guest-name">الاسم</label>
+            <input id="help-guest-name" type="text" maxlength="100" autocomplete="name" placeholder="اكتب اسمك">
+            <label for="help-guest-email">البريد الإلكتروني</label>
+            <input id="help-guest-email" type="email" maxlength="254" autocomplete="email" placeholder="name@example.com">
+          </div>
+          <div id="help-category-field">
+            <label for="help-category">نوع الرسالة</label>
+            <select id="help-category" required>
+              <option value="message">رسالة</option>
+              <option value="complaint">شكوى</option>
+            </select>
+          </div>
+          <label id="help-content-label" for="help-content">رسالتك</label>
           <textarea id="help-content" rows="6" maxlength="3000" required placeholder="اكتب رسالتك أو شكواك هنا..."></textarea>
           <button class="auth-submit" id="help-submit" type="submit">إرسال إلى الأدمن</button>
         </form>

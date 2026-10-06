@@ -1,4 +1,5 @@
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 import json
 from base64 import b64decode
@@ -79,6 +80,21 @@ class CurriculumRetrievalTests(unittest.TestCase):
         self.mock_embeddings = self.embedding_patch.start()
         self.addCleanup(self.embedding_patch.stop)
 
+    def test_local_embedding_model_is_reused_across_threads(self):
+        model = SimpleNamespace(
+            get_sentence_embedding_dimension=lambda: curriculum.EMBEDDING_DIMENSIONS
+        )
+        with patch("curriculum._local_embedding_model", None):
+            with patch("curriculum.SentenceTransformer", return_value=model) as loader:
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    models = list(executor.map(
+                        lambda _: curriculum._get_local_embedding_model(),
+                        range(8),
+                    ))
+
+        self.assertEqual(loader.call_count, 1)
+        self.assertTrue(all(loaded is model for loaded in models))
+
     def test_retrieves_official_content_with_exact_metadata_and_page_image(self):
         database = FakeCurriculumDatabase([curriculum_result()])
         result = curriculum.retrieve_curriculum(
@@ -89,10 +105,11 @@ class CurriculumRetrievalTests(unittest.TestCase):
         )
 
         self.assertTrue(result["official"])
-        self.assertIn("صفحة 47", result["answer_suffix"])
-        self.assertIn("الوحدة الثانية", result["answer_suffix"])
-        self.assertIn("كتاب الفيزياء", result["answer_suffix"])
-        self.assertIn("وزارة التربية والتعليم الأردنية", result["answer_suffix"])
+        self.assertEqual(result["answer_suffix"], "")
+        self.assertEqual(
+            result["sources"],
+            [{"book": "كتاب الفيزياء", "page": 47}],
+        )
         self.assertEqual(database.search_calls[0]["grade"], "الثاني عشر")
         self.assertEqual(database.search_calls[0]["subject"], "الفيزياء")
         self.assertEqual(database.search_calls[0]["semester"], "الفصل الأول")
@@ -103,6 +120,56 @@ class CurriculumRetrievalTests(unittest.TestCase):
         images = [part for part in result["extra_parts"] if part["type"] == "image"]
         self.assertEqual(len(images), 1)
         self.assertEqual(images[0]["mime_type"], "image/jpeg")
+
+    def test_source_footer_shortens_real_book_names_and_deduplicates_pages(self):
+        database = FakeCurriculumDatabase(
+            [
+                curriculum_result(
+                    book_title=(
+                        "كتاب التمارين لمادة الرياضيات الصف الثامن "
+                        "الفصل الثاني.pdf"
+                    ),
+                    subject="الرياضيات",
+                    page_number=6,
+                ),
+                curriculum_result(
+                    chunk_id="chunk-duplicate",
+                    book_title=(
+                        "كتاب التمارين لمادة الرياضيات الصف الثامن "
+                        "الفصل الثاني.pdf"
+                    ),
+                    subject="الرياضيات",
+                    page_number=6,
+                ),
+                curriculum_result(
+                    chunk_id="chunk-student-book",
+                    book_id="book-student",
+                    book_title=(
+                        "كتاب الطالب لمادة الرياضيات الصف الثامن "
+                        "الفصل الثاني.pdf"
+                    ),
+                    subject="الرياضيات",
+                    page_number=17,
+                ),
+            ]
+        )
+
+        result = curriculum.retrieve_curriculum(
+            database,
+            "اشرح الرياضيات",
+            "الثامن",
+            "test-key",
+        )
+
+        self.assertEqual(result["answer_suffix"], "")
+        self.assertEqual(
+            result["sources"],
+            [
+                {"book": "كتاب التمارين", "page": 6},
+                {"book": "كتاب الطالب", "page": 17},
+            ],
+        )
+        self.assertEqual(len(result["sources"]), 2)
 
     def test_uses_explicit_recent_conversation_subject_and_semester(self):
         database = FakeCurriculumDatabase([curriculum_result()])
