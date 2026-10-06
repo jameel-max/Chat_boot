@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import binascii
 import json
 import math
@@ -18,7 +18,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from curriculum import CurriculumError, retrieve_curriculum
 from database import Database
 
 
@@ -52,139 +51,56 @@ ALLOWED_DOCUMENT_EXTENSIONS = {
 }
 database = None
 _database_lock = threading.Lock()
+
 SYSTEM_INSTRUCTION = (
-"أنت فهيم، مساعد ذكي وودود لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
-"تحدث مع الطالب باللهجة الأردنية الطبيعية والواضحة، وبأسلوب إنساني قريب من الطالب، "
-"مع الحفاظ دائمًا على الدقة والاحترام والوضوح. "
+    "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
+    "تحدث باللهجة الأردنية الطبيعية، بوضوح وود، مع الحفاظ على الدقة والاحترام.\n\n"
 
-"إذا قال الطالب مرحبًا أو سأل عن اسمك، قل بوضوح: «أنا فهيم، مساعد ذكي للطلاب في "
-"مدرسة خريبة السوق». وإذا سألك من صنعك أو من طورك، أجب: «صنعني المطور جميل إسماعيل أبو حماد». "
-"لا تغيّر اسمك أو اسم مطورك. "
-"لا تبدأ بتحية من نفسك إذا بدأ الطالب بسؤال أو طلب. "
+    "أجب عن السؤال الحالي مباشرة إذا كان واضحًا، ولا تسأل أسئلة إضافية بلا حاجة. "
+    "إذا كان السؤال غامضًا بشكل يؤثر على الإجابة، اطلب توضيحًا قصيرًا. "
+    "استفد من سياق المحادثة، وانتقل طبيعيًا لأي موضوع جديد يطرحه الطالب.\n\n"
 
-"افهم سؤال الطالب أولًا قبل الإجابة، وركّز على المقصود من السؤال وليس فقط على الكلمات المستخدمة فيه. "
-"إذا كان السؤال واضحًا، أجب مباشرة دون طرح أسئلة غير ضرورية. "
-"إذا كان السؤال يحتمل أكثر من معنى وكانت الإجابة ستختلف بشكل جوهري، اطلب توضيحًا قصيرًا قبل الإجابة. "
-"إذا كان بالإمكان فهم المقصود بدرجة كافية، لا تطلب توضيحًا وابدأ بالإجابة مباشرة. "
+    "في الأسئلة الدراسية، ابدأ بالجواب المباشر ثم اشرح بالقدر المناسب لمستوى الطالب. "
+    "في الرياضيات والعلوم، اعرض خطوات الحل بوضوح وتحقق من النتيجة. "
+    "لا تخترع معلومات، وكن صريحًا عند عدم التأكد.\n\n"
 
-"لا تحصر المحادثة في المادة التي سأل الطالب عنها سابقًا، وتذكّر سياق المحادثة عندما يكون ذلك مفيدًا. "
-"إذا غيّر الطالب الموضوع، انتقل معه بشكل طبيعي إلى الموضوع الجديد. "
-"لا تفترض أن الطالب يريد إجابة مدرسية لمجرد أنه طالب؛ أجب عن السؤال الذي طرحه فعلًا. "
+    "استخدم Markdown بشكل بسيط. "
+    "استخدم القوائم والعناوين والجداول فقط عندما تكون مفيدة. "
+    "الجداول يجب أن تكون HTML باستخدام <table> و<thead> و<tbody> و<tr> و<th> و<td> فقط، "
+    "ولا تستخدم جداول Markdown. "
+    "لا تستخدم HTML للقوائم أو الفقرات.\n\n"
 
-"اجعل كتب ومناهج وزارة التربية والتعليم الأردنية مرجعك الدراسي الأساسي في الأسئلة المتعلقة بالمنهاج الأردني. "
-"عند شرح مادة دراسية، حاول الالتزام بالمصطلحات والتعريفات والأفكار المعتمدة في المنهاج. "
-"إذا لم تكن متأكدًا من معلومة تخص المنهاج، قل بوضوح إنك غير متأكد، "
-"ولا تنسب للكتاب أو المنهاج كلامًا لم تتحقق منه. "
-"ميّز بوضوح بين ما هو وارد في المنهاج وما هو شرح إضافي أو تبسيط منك. "
+    "في الرياضيات، استخدم LaTeX فقط: "
+    "للمعادلات داخل السطر \\( ... \\)، وللمعادلات المستقلة \\[ ... \\]. "
+    "لا تستخدم $$ ... $$.\n\n"
 
-"استخدم محتوى الكتب والمناهج المسترجع داخليًا للتحقق من الإجابة، ولا تختلق معلومة أو تنسبها إلى مرجع لم تتحقق منه. "
-"لا تعرض للطالب أسماء الكتب أو المصادر أو أرقام الصفحات أو روابطها أو قائمة مراجع، حتى إذا طلب مصادر؛ "
-"قدّم الإجابة مباشرة بالاعتماد على المحتوى المسترجع دون إظهار بياناته المرجعية. "
-"إذا أعطاك الطالب نصًا أو صورة أو معلومة، تعامل معها باعتبارها مادة مقدمة من الطالب، "
-"وحلّلها أو اشرحها دون اختلاق معلومات غير موجودة فيها. "
-"إذا كانت هناك معلومة ناقصة تمنع الوصول إلى إجابة موثوقة، وضّح ما الذي ينقص بدل التخمين. "
+    "استخدم **الخط العريض** باعتدال، ولا تستخدم ==للتظليل==. "
+    "ضع الأكواد داخل كتلة Markdown محددة بثلاث علامات backticks، واذكر نوع اللغة إن عرفته.\n\n"
 
-"اشرح للطالب بطريقة تناسب مستواه، وابدأ بالجواب المباشر ثم أضف الشرح الضروري. "
-"لا تستخدم تعقيدًا لغويًا أو مصطلحات صعبة دون شرحها ببساطة. "
-"إذا كان السؤال بسيطًا، اجعل الإجابة قصيرة. "
-"وإذا كان يحتاج شرحًا، قدّم شرحًا كافيًا دون حشو. "
-"لا تكرر نفس الفكرة بصيغ متعددة إلا إذا كان التكرار مفيدًا للتوضيح. "
+    "إذا أعطاك الطالب نصًا أو صورة، تعامل معه كمحتوى مقدم من الطالب ولا تخترع ما ليس فيه. "
+    "إذا كانت المعلومات ناقصة، وضّح ما ينقص بدل التخمين.\n\n"
 
-"في المسائل العلمية والرياضية، اعرض طريقة الحل بوضوح وتحقق من النتيجة قبل تقديمها. "
-"لا تكتفِ بإعطاء الناتج إذا كان الطالب يحتاج إلى فهم الطريقة، إلا إذا طلب الناتج فقط. "
-"في الأسئلة التي تتطلب خطوات، رتّب الخطوات ترتيبًا منطقيًا وواضحًا. "
-"إذا كان هناك أكثر من طريقة صحيحة للحل، اذكر الطريقة الأبسط أولًا، "
-"ويمكن الإشارة للطرق الأخرى باختصار عند فائدتها. "
+    "إذا صحح الطالب معلومة، خذ التصحيح بعين الاعتبار. "
+    "إذا أخطأت سابقًا، اعترف بالخطأ وصححه باختصار.\n\n"
 
-"نسّق الإجابة لتكون سهلة القراءة: إذا احتوت على أكثر من فكرة، افصل الأفكار في فقرات "
-"قصيرة واترك سطرًا فارغًا بين الفقرات، واجعل كل فقرة تشرح فكرة واحدة. "
-"في الشرح الطويل أو متعدد الأجزاء، استخدم عناوين Markdown قصيرة وواضحة عند الحاجة، "
-"واختر مستوى العنوان المناسب من # إلى #### دون وضع عنوان لكل فقرة. "
-"استخدم القوائم عندما تتعدد العناصر، والخطوات المرقمة عند وجود ترتيب؛ "
-"أما الإجابة البسيطة فلتبقَ مباشرة وقصيرة في فقرة واحدة. "
-"إذا طلب الطالب أن يكون كل عنصر أو صنف في سطر، أو كانت الإجابة استخراجًا لعدة أصناف "
-"أو أسماء أو أسعار، فاكتب كل عنصر في سطر مستقل مستخدمًا قائمة Markdown، "
-"ولا تجمع عنصرين في السطر نفسه أو تحوّل القائمة إلى فقرة متصلة، حتى عند تنسيق نص مستخرج من صورة. "
-"للنقاط غير المرتبة، ابدأ كل عنصر بـ - أو •. "
-"للخطوات المتسلسلة، استخدم رقمًا متبوعًا بنقطة. "
-"إذا طلب الطالب إعادة تنظيم أو تنسيق معلومات سبق ذكرها، مثل: رتّبها بجدول، "
-"نظّم المعلومات بشكل جدول، اعملها جدول، أو حطّها بجدول، فارجع إلى أحدث معلومات "
-"ذات صلة في سياق المحادثة، بما فيها إجابة فهيم، وأعد تنسيق المعلومات نفسها فقط. "
-"حافظ على الموضوع والأسماء والأرقام والتفاصيل كما وردت، ولا تبدأ موضوعًا أو خطة "
-"جديدة ولا تضف معلومات لم يطلبها الطالب. إذا لم يتضمن السياق المعلومات المطلوبة، "
-"اطلب توضيحًا بدل افتراض موضوع جديد أو التخمين. "
-"استخدم الجداول عندما تكون المعلومات أوضح في صفوف وأعمدة، "
-"مثل الجداول الدراسية والخطط والمواعيد والمقارنات أو العناصر ذات الخصائص المتكررة. "
-"اعرض الجدول بعناصر HTML الهيكلية <table> و<thead> و<tbody> و<tr> و<th> و<td>، "
-"ولا تستخدم صيغة Markdown ذات | للجداول. لا تضف سمات HTML أو CSS أو JavaScript للجدول. "
-"لا تستخدم جدولًا لمجرد وجود عدة نقاط؛ فالتعريف البسيط والشرح المتصل والقصة "
-"وخطوات حل المسألة أوضح عادةً كنص أو قائمة. "
-"في الرياضيات، اعرض المعادلات والشرح الرياضي العادي كنص أو خطوات واضحة، "
-"ولا تضعهما في جدول إلا إذا كان الجدول مفيدًا فعلًا لتنظيم قيم أو مقارنتها. "
-"فضّل كتابة المعادلات بصيغ نصية بسيطة وواضحة، وتجنب LaTeX المعقد "
-"ما لم يكن عرضه مدعومًا بوضوح. "
-"استخدم **الخط العريض** للمصطلحات أو النتائج المهمة باعتدال، "
-"واستخدم ==التظليل== فقط للكلمة أو النتيجة التي تستحق إبرازًا واضحًا. "
-"اكتب الشيفرة البرمجية داخل كتلة Markdown محددة بثلاث علامات backticks، "
-"واذكر نوع اللغة بعد العلامات عند معرفته. "
-"لا تكتب وسوم HTML أخرى مثل <ol> أو <li> أو <ul>؛ يُسمح فقط بعناصر الجدول المذكورة. "
-"اجعل الفقرات وعناصر القوائم قصيرة ومتماسكة، ولا تحوّل كل إجابة إلى قائمة لمجرد التنظيم. "
+    "لا تبدأ بتحية إذا بدأ الطالب بسؤال مباشر، ولا تضف سؤال متابعة تلقائيًا في نهاية الإجابة. "
+    "كن طبيعيًا واستخدم عبارات أردنية خفيفة عند ملاءمتها مثل: تمام، أكيد، شوف، ببساطة.\n\n"
 
-"كن صريحًا بشأن حدود معرفتك. لا تتظاهر باليقين عندما تكون المعلومة غير مؤكدة. "
-"إذا كان هناك أكثر من تفسير أو إجابة بحسب السياق، وضّح ذلك بدل اختيار تفسير عشوائي. "
-"إذا صحّح الطالب معلومة أو أعطاك معلومة جديدة، خذها بعين الاعتبار وعدّل إجابتك بناءً عليها. "
-"إذا اكتشفت أن إجابة سابقة منك كانت خاطئة، اعترف بالخطأ باختصار وصحح المعلومة بدل الدفاع عن الإجابة السابقة. "
+    "في المعلومات الحديثة أو التي تعتمد على الوقت، استخدم الأدوات المتاحة للتحقق منها. "
+    "وفي الأسئلة الدينية والتشريعات القرآنية، تحقّق من الأدلة الموثوقة قبل الجزم.\n\n"
 
-"لا تتعامل مع كل سؤال وكأنه امتحان. "
-"يمكن أن تكون الإجابة تعليمية أو تفسيرية أو عملية بحسب طلب الطالب. "
-"إذا طلب الطالب مثالًا، أعطه مثالًا واضحًا ومناسبًا. "
-"إذا طلب تبسيطًا، أعد الشرح بطريقة أسهل بدل تكرار النص نفسه. "
-"إذا طلب مقارنة، قارن بوضوح دون حشو. "
-"إذا طلب تلخيصًا، حافظ على الأفكار الأساسية دون إضافة معلومات غير موجودة في النص الأصلي. "
-"إذا طلب صياغة أو إعادة كتابة نص، حافظ على المعنى المطلوب واجعل النص طبيعيًا وقابلًا للاستخدام مباشرة. "
+    "إذا سُئلت عن اسمك، قل: «أنا فهيم، مساعد ذكي للطلاب في مدرسة خريبة السوق الثانوية الثانية للبنين». "
+    "إذا سُئلت عن مطورك، قل: «صنعني المطور جميل إسماعيل أبو حماد». "
+    "لا تغيّر اسمك أو اسم مطورك.\n\n"
 
-"لا تجعل أسلوبك آليًا أو رسميًا بشكل مبالغ فيه. "
-"كن ودودًا وطبيعيًا، واستخدم عبارات أردنية خفيفة عند ملاءمتها مثل: "
-"تمام، أكيد، شوف، ببساطة، الفكرة هون، يعني، خلينا نفهمها هيك. "
-"لكن لا تفرط في اللهجة على حساب وضوح المعلومة. "
-"لا تستخدم ألفاظًا أو مزاحًا قد يكون غير مناسب للطالب أو للموقف. "
+    "فهيم مساعد نصي ولا ينشئ الصور. إذا طلب الطالب إنشاء صورة، وضّح ذلك باختصار، "
+    "ويمكنك مساعدته في كتابة وصف للصورة أو تحليل صورة يرسلها.\n\n"
 
-"أجب عن السؤال الحالي أولًا، ولا تجرّ المحادثة لموضوع آخر دون سبب. "
-"لا تضف أسئلة في نهاية كل إجابة بشكل تلقائي مثل: هل تريد المزيد؟ "
-"اسأل سؤال متابعة فقط عندما يكون ذلك مفيدًا فعلًا لفهم المطلوب أو إكمال المهمة. "
-
-"إذا طلب الطالب شيئًا خارج الدراسة، أجب عنه بشكل طبيعي ما دام السؤال مناسبًا وآمنًا، "
-"ولا تفترض أن كل سؤال يجب ربطه بالمدرسة أو المنهاج. "
-
-"إذا طلب الطالب معلومات حديثة أو معلومة تعتمد على أحداث أو بيانات متغيرة، "
-"لا تقدّم معلومة قديمة على أنها حالية. "
-"إذا لم يكن لديك وصول موثوق إلى المعلومات الحديثة، وضّح ذلك ولا تخمّن. "
-
-"عند سؤال الطالب عن تاريخ اليوم أو الوقت الحالي أو اليوم من الأسبوع، "
-"لا تعتمد على تاريخ مكتوب داخل التعليمات أو على تاريخ سابق في المحادثة. "
-"استخدم التاريخ والوقت الحاليين المتاحين للنظام وقت الإجابة. "
-"إذا لم يكن لديك وصول موثوق للتاريخ أو الوقت الحالي، قل للطالب بوضوح إنك لا تستطيع التحقق منه بدل اختراع تاريخ. "
-"لا تثبّت أي تاريخ محدد داخل التعليمات باعتباره تاريخ اليوم، "
-"ولا تعتبر أي تاريخ موجود داخل SYSTEM_INSTRUCTION تاريخًا حاليًا. "
-
-"تعامل مع الأدوات المتاحة في النظام على أنها أدوات تنفيذ حقيقية وليست نصوصًا للعرض على الطالب. "
-"عند وجود أداة مناسبة لتنفيذ طلب الطالب، استخدم الأداة الفعلية بدل محاكاة استخدامها داخل الرد النصي. "
-
-"فهيم مساعد نصّي ولا ينشئ الصور. إذا طلب الطالب إنشاء صورة أو رسمها، "
-"أخبره باختصار ووضوح أنك لا تستطيع إنشاء الصور لأنك مساعد نصّي. "
-"يمكنك مساعدته بكتابة وصف نصّي للصورة إذا طلب ذلك، كما يمكنك تحليل صورة يرسلها الطالب. "
-"لا تدّعِ إنشاء صورة ولا تقدّم وصفًا للصورة بدل تنفيذ الطلب إلا إذا طلب الطالب وصفًا نصيًا. "
-
-"الهدف الأساسي هو أن يشعر الطالب أنه يتحدث مع مساعد يفهمه، "
-"ويعطيه إجابة دقيقة ومباشرة ومناسبة لسياقه، "
-"دون حشو أو تعقيد أو ادعاء معرفة غير مؤكدة، "
-"ويستخدم الأدوات المتاحة فعليًا عندما تكون ضرورية لتنفيذ طلب الطالب."
-"في الاسئلة الدينية والتشريعات القرانية تاكد منها عن طريق البحث والتدقيق في الادلة الشرعية"
-
-
+    "هدفك: إجابة دقيقة، مباشرة، طبيعية، ومناسبة لسؤال الطالب دون حشو."
 )
+
 GRADE_NAMES = {
-    "الاول": "الأول",
+    "الأول": "الأول",
     "اول": "الأول",
     "الثاني": "الثاني",
     "ثاني": "الثاني",
@@ -212,8 +128,8 @@ GRADE_NAMES = {
 
 
 def extract_student_grade(message, allow_short_answer=False):
-    normalized = message.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
-    normalized = re.sub(r"[\u064b-\u065f\u0670ـ]", "", normalized).casefold()
+    normalized = message.translate(str.maketrans("ظ ظ،ظ¢ظ£ظ¤ظ¥ظ¦ظ§ظ¨ظ©", "0123456789"))
+    normalized = re.sub(r"[\u064b-\u065f\u0670ظ€]", "", normalized).casefold()
     grade_pattern = "|".join(
         sorted(
             (re.escape(name) for name in GRADE_NAMES),
@@ -222,41 +138,41 @@ def extract_student_grade(message, allow_short_answer=False):
         )
     )
     match = re.search(
-        rf"(?:صف(?:ي)?|الصف|بالصف|بالصف الدراسي)\s*"
-        rf"(?:رقم\s*)?(?:(?:ال)?({grade_pattern})|([1-9]|1[0-2]))"
+        rf"(?:طµظپ(?:ظٹ)?|ط§ظ„طµظپ|ط¨ط§ظ„طµظپ|ط¨ط§ظ„طµظپ ط§ظ„ط¯ط±ط§ط³ظٹ)\s*"
+        rf"(?:ط±ظ‚ظ…\s*)?(?:(?:ط§ظ„)?({grade_pattern})|([1-9]|1[0-2]))"
         rf"(?!\d)",
         normalized,
     )
     if not match and allow_short_answer:
         match = re.fullmatch(
-            rf"(?:(?:انا|اني)\s+)?(?:الصف\s+)?"
-            rf"(?:(?:ال)?({grade_pattern})|([1-9]|1[0-2]))"
-            rf"[.!؟،\s]*",
+            rf"(?:(?:ط§ظ†ط§|ط§ظ†ظٹ)\s+)?(?:ط§ظ„طµظپ\s+)?"
+            rf"(?:(?:ط§ظ„)?({grade_pattern})|([1-9]|1[0-2]))"
+            rf"[.!طںطŒ\s]*",
             normalized,
         )
     if not match:
         return None
     if match.group(1):
         return GRADE_NAMES[match.group(1)]
-    return f"الصف {match.group(2)}"
+    return f"ط§ظ„طµظپ {match.group(2)}"
 
 
 def user_starts_with_greeting(message):
-    normalized = re.sub(r"[\u064b-\u065f\u0670ـ]", "", message.strip()).casefold()
+    normalized = re.sub(r"[\u064b-\u065f\u0670ظ€]", "", message.strip()).casefold()
     return re.match(
-        r"^(?:السلام عليكم|سلام|مرحبا|مرحباً|أهلا|اهلا|أهلًا|هلا|"
-        r"صباح الخير|مساء الخير|هاي|hello|hi)(?=$|[\s،,:.!؟!?-])",
+        r"^(?:ط§ظ„ط³ظ„ط§ظ… ط¹ظ„ظٹظƒظ…|ط³ظ„ط§ظ…|ظ…ط±ط­ط¨ط§|ظ…ط±ط­ط¨ط§ظ‹|ط£ظ‡ظ„ط§|ط§ظ‡ظ„ط§|ط£ظ‡ظ„ظ‹ط§|ظ‡ظ„ط§|"
+        r"طµط¨ط§ط­ ط§ظ„ط®ظٹط±|ظ…ط³ط§ط، ط§ظ„ط®ظٹط±|ظ‡ط§ظٹ|hello|hi)(?=$|[\sطŒ,:.!طں!?-])",
         normalized,
     ) is not None
 
 
 def user_asks_assistant_identity(message):
-    normalized = re.sub(r"[\u064b-\u065f\u0670ـ]", "", message.casefold())
+    normalized = re.sub(r"[\u064b-\u065f\u0670ظ€]", "", message.casefold())
     return re.search(
-        r"(?:شو|ما|ايش|إيش|وش)\s+(?:هو\s+)?اسمك|"
-        r"(?:مين|من)\s+(?:أنت|انت)|"
-        r"(?:مين|من)\s+(?:صنعك|طورك|طوّرك)|"
-        r"عرفني\s+عن\s+نفسك|احكيلي\s+عن\s+نفسك",
+        r"(?:ط´ظˆ|ظ…ط§|ط§ظٹط´|ط¥ظٹط´|ظˆط´)\s+(?:ظ‡ظˆ\s+)?ط§ط³ظ…ظƒ|"
+        r"(?:ظ…ظٹظ†|ظ…ظ†)\s+(?:ط£ظ†طھ|ط§ظ†طھ)|"
+        r"(?:ظ…ظٹظ†|ظ…ظ†)\s+(?:طµظ†ط¹ظƒ|ط·ظˆط±ظƒ|ط·ظˆظ‘ط±ظƒ)|"
+        r"ط¹ط±ظپظ†ظٹ\s+ط¹ظ†\s+ظ†ظپط³ظƒ|ط§ط­ظƒظٹظ„ظٹ\s+ط¹ظ†\s+ظ†ظپط³ظƒ",
         normalized,
     ) is not None
 
@@ -267,36 +183,36 @@ def conversation_system_instruction(
     instructions = [SYSTEM_INSTRUCTION]
     if user_greeted or asks_identity:
         instructions.append(
-            "في هذه الرسالة، عرّف عن نفسك بوضوح بالنص: "
-            "«أنا فهيم، مساعد ذكي للطلاب في مدرسة خريبة السوق». "
-            "إذا سأل الطالب عن مطورك، قل: «صنعني المطور جميل إسماعيل أبو حماد»."
+            "ظپظٹ ظ‡ط°ظ‡ ط§ظ„ط±ط³ط§ظ„ط©طŒ ط¹ط±ظ‘ظپ ط¹ظ† ظ†ظپط³ظƒ ط¨ظˆط¶ظˆط­ ط¨ط§ظ„ظ†طµ: "
+            "آ«ط£ظ†ط§ ظپظ‡ظٹظ…طŒ ظ…ط³ط§ط¹ط¯ ط°ظƒظٹ ظ„ظ„ط·ظ„ط§ط¨ ظپظٹ ظ…ط¯ط±ط³ط© ط®ط±ظٹط¨ط© ط§ظ„ط³ظˆظ‚آ». "
+            "ط¥ط°ط§ ط³ط£ظ„ ط§ظ„ط·ط§ظ„ط¨ ط¹ظ† ظ…ط·ظˆط±ظƒطŒ ظ‚ظ„: آ«طµظ†ط¹ظ†ظٹ ط§ظ„ظ…ط·ظˆط± ط¬ظ…ظٹظ„ ط¥ط³ظ…ط§ط¹ظٹظ„ ط£ط¨ظˆ ط­ظ…ط§ط¯آ»."
         )
         if user_greeted:
-            instructions.append("بدأ الطالب بتحية؛ ابدأ بهذا التعريف ثم أجب عن سؤاله.")
+            instructions.append("ط¨ط¯ط£ ط§ظ„ط·ط§ظ„ط¨ ط¨طھط­ظٹط©ط› ط§ط¨ط¯ط£ ط¨ظ‡ط°ط§ ط§ظ„طھط¹ط±ظٹظپ ط«ظ… ط£ط¬ط¨ ط¹ظ† ط³ط¤ط§ظ„ظ‡.")
     elif first_reply:
         instructions.append(
-            "هذه أول رسالة في المحادثة ولم يبدأ الطالب بتحية؛ لا ترحّب به "
-            "ولا تعرّف بنفسك، وابدأ بالمعلومة أو الحل مباشرة دون مقدمة."
+            "ظ‡ط°ظ‡ ط£ظˆظ„ ط±ط³ط§ظ„ط© ظپظٹ ط§ظ„ظ…ط­ط§ط¯ط«ط© ظˆظ„ظ… ظٹط¨ط¯ط£ ط§ظ„ط·ط§ظ„ط¨ ط¨طھط­ظٹط©ط› ظ„ط§ طھط±ط­ظ‘ط¨ ط¨ظ‡ "
+            "ظˆظ„ط§ طھط¹ط±ظ‘ظپ ط¨ظ†ظپط³ظƒطŒ ظˆط§ط¨ط¯ط£ ط¨ط§ظ„ظ…ط¹ظ„ظˆظ…ط© ط£ظˆ ط§ظ„ط­ظ„ ظ…ط¨ط§ط´ط±ط© ط¯ظˆظ† ظ…ظ‚ط¯ظ…ط©."
         )
     else:
         instructions.append(
-            "هذه متابعة لمحادثة بدأت سابقًا؛ أجب عن الرسالة مباشرة ولا تبدأ بتحية."
+            "ظ‡ط°ظ‡ ظ…طھط§ط¨ط¹ط© ظ„ظ…ط­ط§ط¯ط«ط© ط¨ط¯ط£طھ ط³ط§ط¨ظ‚ظ‹ط§ط› ط£ط¬ط¨ ط¹ظ† ط§ظ„ط±ط³ط§ظ„ط© ظ…ط¨ط§ط´ط±ط© ظˆظ„ط§ طھط¨ط¯ط£ ط¨طھط­ظٹط©."
         )
 
     if grade:
         instructions.append(
-            f"صف الطالب المحفوظ في ملفه هو {grade}. استخدم كتب هذا الصف "
-            "ومنهجه الأردني عند صلة السؤال بالدراسة."
+            f"طµظپ ط§ظ„ط·ط§ظ„ط¨ ط§ظ„ظ…ط­ظپظˆط¸ ظپظٹ ظ…ظ„ظپظ‡ ظ‡ظˆ {grade}. ط§ط³طھط®ط¯ظ… ظƒطھط¨ ظ‡ط°ط§ ط§ظ„طµظپ "
+            "ظˆظ…ظ†ظ‡ط¬ظ‡ ط§ظ„ط£ط±ط¯ظ†ظٹ ط¹ظ†ط¯ طµظ„ط© ط§ظ„ط³ط¤ط§ظ„ ط¨ط§ظ„ط¯ط±ط§ط³ط©."
         )
     elif ask_grade:
         instructions.append(
-            "لم يُعرف صف الطالب بعد. اسأله مرة واحدة فقط وبأسلوب أردني طبيعي: "
-            "«وبالمناسبة، إنت بأي صف؟» ولا تؤخر الإجابة عن سؤاله بانتظار الصف."
+            "ظ„ظ… ظٹظڈط¹ط±ظپ طµظپ ط§ظ„ط·ط§ظ„ط¨ ط¨ط¹ط¯. ط§ط³ط£ظ„ظ‡ ظ…ط±ط© ظˆط§ط­ط¯ط© ظپظ‚ط· ظˆط¨ط£ط³ظ„ظˆط¨ ط£ط±ط¯ظ†ظٹ ط·ط¨ظٹط¹ظٹ: "
+            "آ«ظˆط¨ط§ظ„ظ…ظ†ط§ط³ط¨ط©طŒ ط¥ظ†طھ ط¨ط£ظٹ طµظپطںآ» ظˆظ„ط§ طھط¤ط®ط± ط§ظ„ط¥ط¬ط§ط¨ط© ط¹ظ† ط³ط¤ط§ظ„ظ‡ ط¨ط§ظ†طھط¸ط§ط± ط§ظ„طµظپ."
         )
     else:
         instructions.append(
-            "سبق أن سُئل الطالب عن صفه ولم يقدّم صفًا محفوظًا؛ لا تعاود السؤال عنه "
-            "في هذه المحادثة أو في محادثة جديدة."
+            "ط³ط¨ظ‚ ط£ظ† ط³ظڈط¦ظ„ ط§ظ„ط·ط§ظ„ط¨ ط¹ظ† طµظپظ‡ ظˆظ„ظ… ظٹظ‚ط¯ظ‘ظ… طµظپظ‹ط§ ظ…ط­ظپظˆط¸ظ‹ط§ط› ظ„ط§ طھط¹ط§ظˆط¯ ط§ظ„ط³ط¤ط§ظ„ ط¹ظ†ظ‡ "
+            "ظپظٹ ظ‡ط°ظ‡ ط§ظ„ظ…ط­ط§ط¯ط«ط© ط£ظˆ ظپظٹ ظ…ط­ط§ط¯ط«ط© ط¬ط¯ظٹط¯ط©."
         )
     return " ".join(instructions)
 
@@ -317,13 +233,13 @@ def get_database():
 
 def wants_image_generation(message):
     normalized = message.casefold()
-    normalized = normalized.translate(str.maketrans("أإآ", "ااا"))
-    normalized = re.sub(r"[\u064b-\u065f\u0670ـ]", "", normalized)
+    normalized = normalized.translate(str.maketrans("ط£ط¥ط¢", "ط§ط§ط§"))
+    normalized = re.sub(r"[\u064b-\u065f\u0670ظ€]", "", normalized)
     return re.search(
-        r"(?:ارسم(?:ي|لي)?|انشئ(?:ي|لي)?|اعمل(?:ي|لي)?|اعمللي|سوي|صمم(?:ي|لي)?|"
-        r"ولد|تولد|بدي|اريد|ممكن|please)\s*(?:لي\s*)?(?:ان\s*)?"
-        r"(?:(?:تعمل|اعمل|ترسم|ارسم|تنشئ|انشئ|تصمم|صمم)\s*)?"
-        r"(?:صورة|صوره|صور|رسمة|لوحة|تصميم|خلفية|ملصق|شعار|"
+        r"(?:ط§ط±ط³ظ…(?:ظٹ|ظ„ظٹ)?|ط§ظ†ط´ط¦(?:ظٹ|ظ„ظٹ)?|ط§ط¹ظ…ظ„(?:ظٹ|ظ„ظٹ)?|ط§ط¹ظ…ظ„ظ„ظٹ|ط³ظˆظٹ|طµظ…ظ…(?:ظٹ|ظ„ظٹ)?|"
+        r"ظˆظ„ط¯|طھظˆظ„ط¯|ط¨ط¯ظٹ|ط§ط±ظٹط¯|ظ…ظ…ظƒظ†|please)\s*(?:ظ„ظٹ\s*)?(?:ط§ظ†\s*)?"
+        r"(?:(?:طھط¹ظ…ظ„|ط§ط¹ظ…ظ„|طھط±ط³ظ…|ط§ط±ط³ظ…|طھظ†ط´ط¦|ط§ظ†ط´ط¦|طھطµظ…ظ…|طµظ…ظ…)\s*)?"
+        r"(?:طµظˆط±ط©|طµظˆط±ظ‡|طµظˆط±|ط±ط³ظ…ط©|ظ„ظˆط­ط©|طھطµظ…ظٹظ…|ط®ظ„ظپظٹط©|ظ…ظ„طµظ‚|ط´ط¹ط§ط±|"
         r"an?\s+(?:image|picture|illustration)|image|picture)",
         normalized,
     ) is not None
@@ -350,28 +266,28 @@ def select_prior_images(messages, current_message):
         return []
 
     normalized = current_message.casefold().translate(
-        str.maketrans("أإآ", "ااا")
+        str.maketrans("ط£ط¥ط¢", "ط§ط§ط§")
     )
-    normalized = normalized.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+    normalized = normalized.translate(str.maketrans("ظ ظ،ظ¢ظ£ظ¤ظ¥ظ¦ظ§ظ¨ظ©", "0123456789"))
     image_ordinals = {
         "1": 1,
         "first": 1,
-        "الاولى": 1,
-        "اولى": 1,
-        "الأولى": 1,
+        "ط§ظ„ط§ظˆظ„ظ‰": 1,
+        "ط§ظˆظ„ظ‰": 1,
+        "ط§ظ„ط£ظˆظ„ظ‰": 1,
         "2": 2,
         "second": 2,
-        "الثانية": 2,
-        "ثانيه": 2,
+        "ط§ظ„ط«ط§ظ†ظٹط©": 2,
+        "ط«ط§ظ†ظٹظ‡": 2,
         "3": 3,
         "third": 3,
-        "الثالثة": 3,
-        "ثالثه": 3,
+        "ط§ظ„ط«ط§ظ„ط«ط©": 3,
+        "ط«ط§ظ„ط«ظ‡": 3,
     }
     ordinal_matches = re.findall(
-        r"(?:الصورة|الصوره|صورة|image|picture)\s*(?:رقم\s*)?"
-        r"(\d+|first|second|third|الأولى|الاولى|اولى|الثانية|ثانيه|"
-        r"الثالثة|ثالثه)",
+        r"(?:ط§ظ„طµظˆط±ط©|ط§ظ„طµظˆط±ظ‡|طµظˆط±ط©|image|picture)\s*(?:ط±ظ‚ظ…\s*)?"
+        r"(\d+|first|second|third|ط§ظ„ط£ظˆظ„ظ‰|ط§ظ„ط§ظˆظ„ظ‰|ط§ظˆظ„ظ‰|ط§ظ„ط«ط§ظ†ظٹط©|ط«ط§ظ†ظٹظ‡|"
+        r"ط§ظ„ط«ط§ظ„ط«ط©|ط«ط§ظ„ط«ظ‡)",
         normalized,
     )
     requested_ordinals = {
@@ -385,13 +301,13 @@ def select_prior_images(messages, current_message):
             if 1 <= index <= len(images)
         ]
 
-    if re.search(r"قارن|مقارن|الصورتين|الصور|compare|both images", normalized):
+    if re.search(r"ظ‚ط§ط±ظ†|ظ…ظ‚ط§ط±ظ†|ط§ظ„طµظˆط±طھظٹظ†|ط§ظ„طµظˆط±|compare|both images", normalized):
         return images
 
     if re.search(
-        r"صورة|الصورة|الصوره|المرفق|المرفقة|image|picture|"
-        r"هاي|هذي|هذه|هذا|هي|هو|نفسها|نفسه|زيها|مثلها|عليها|فيها|"
-        r"السابق|السابقة|قبل|كمان|it\b|this\b|that\b|same\b",
+        r"طµظˆط±ط©|ط§ظ„طµظˆط±ط©|ط§ظ„طµظˆط±ظ‡|ط§ظ„ظ…ط±ظپظ‚|ط§ظ„ظ…ط±ظپظ‚ط©|image|picture|"
+        r"ظ‡ط§ظٹ|ظ‡ط°ظٹ|ظ‡ط°ظ‡|ظ‡ط°ط§|ظ‡ظٹ|ظ‡ظˆ|ظ†ظپط³ظ‡ط§|ظ†ظپط³ظ‡|ط²ظٹظ‡ط§|ظ…ط«ظ„ظ‡ط§|ط¹ظ„ظٹظ‡ط§|ظپظٹظ‡ط§|"
+        r"ط§ظ„ط³ط§ط¨ظ‚|ط§ظ„ط³ط§ط¨ظ‚ط©|ظ‚ط¨ظ„|ظƒظ…ط§ظ†|it\b|this\b|that\b|same\b",
         normalized,
     ):
         return [images[-1]]
@@ -448,16 +364,16 @@ def build_conversation_input(
         - image_tokens
     )
     if available_tokens < 0:
-        raise ValueError("تجاوزت الرسالة والمرفقات حد سياق Gemini.")
+        raise ValueError("طھط¬ط§ظˆط²طھ ط§ظ„ط±ط³ط§ظ„ط© ظˆط§ظ„ظ…ط±ظپظ‚ط§طھ ط­ط¯ ط³ظٹط§ظ‚ Gemini.")
 
     rendered_history = []
     image_number = 0
     for message in previous_messages:
-        line = f"{'الطالب' if message['role'] == 'user' else 'فهيم'}: "
-        line += message["content"] or "(رسالة بلا نص)"
+        line = f"{'ط§ظ„ط·ط§ظ„ط¨' if message['role'] == 'user' else 'ظپظ‡ظٹظ…'}: "
+        line += message["content"] or "(ط±ط³ط§ظ„ط© ط¨ظ„ط§ ظ†طµ)"
         if message.get("has_image") or message.get("image_data") is not None:
             image_number += 1
-            line += f" [أرفق الطالب صورة سابقة رقم {image_number}]"
+            line += f" [ط£ط±ظپظ‚ ط§ظ„ط·ط§ظ„ط¨ طµظˆط±ط© ط³ط§ط¨ظ‚ط© ط±ظ‚ظ… {image_number}]"
         rendered_history.append((line, math.ceil(len(line.encode("utf-8")) / 2)))
 
     history_lines = []
@@ -472,8 +388,8 @@ def build_conversation_input(
     history_text = ""
     if history_lines:
         history_text = (
-            "سجل المحادثة السابق، مرتبًا من الأقدم إلى الأحدث. "
-            "استخدمه لفهم الإشارات والضمائر والسياق:\n"
+            "ط³ط¬ظ„ ط§ظ„ظ…ط­ط§ط¯ط«ط© ط§ظ„ط³ط§ط¨ظ‚طŒ ظ…ط±طھط¨ظ‹ط§ ظ…ظ† ط§ظ„ط£ظ‚ط¯ظ… ط¥ظ„ظ‰ ط§ظ„ط£ط­ط¯ط«. "
+            "ط§ط³طھط®ط¯ظ…ظ‡ ظ„ظپظ‡ظ… ط§ظ„ط¥ط´ط§ط±ط§طھ ظˆط§ظ„ط¶ظ…ط§ط¦ط± ظˆط§ظ„ط³ظٹط§ظ‚:\n"
             + "\n".join(history_lines)
         )
     context_parts = (
@@ -482,7 +398,7 @@ def build_conversation_input(
     for image in selected_images:
         context_parts.extend(
             [
-                {"type": "text", "text": "صورة سابقة أشار إليها الطالب:"},
+                {"type": "text", "text": "طµظˆط±ط© ط³ط§ط¨ظ‚ط© ط£ط´ط§ط± ط¥ظ„ظٹظ‡ط§ ط§ظ„ط·ط§ظ„ط¨:"},
                 {
                     "type": "image",
                     "mime_type": image["image_mime"],
@@ -499,7 +415,7 @@ def build_conversation_input(
         ).encode("utf-8")
     )
     if request_size > MAX_GEMINI_REQUEST_BYTES:
-        raise ValueError("تجاوز حجم سياق المحادثة حد طلب Gemini.")
+        raise ValueError("طھط¬ط§ظˆط² ط­ط¬ظ… ط³ظٹط§ظ‚ ط§ظ„ظ…ط­ط§ط¯ط«ط© ط­ط¯ ط·ظ„ط¨ Gemini.")
 
     return parts
 
@@ -508,38 +424,38 @@ def make_conversation_title(message, has_image):
     title = message.strip()
     title = re.sub(r"\s+", " ", title)
     if has_image and not title:
-        return "محادثة حول صورة"
+        return "ظ…ط­ط§ط¯ط«ط© ط­ظˆظ„ طµظˆط±ط©"
 
     title = re.sub(
-        r"^(?:(?:السلام عليكم|مرحبا|مرحباً|أهلاً|اهلا|أهلًا|هلا|هاي|hello|hi)"
-        r"[\s،,:.!؟-]*)+",
+        r"^(?:(?:ط§ظ„ط³ظ„ط§ظ… ط¹ظ„ظٹظƒظ…|ظ…ط±ط­ط¨ط§|ظ…ط±ط­ط¨ط§ظ‹|ط£ظ‡ظ„ط§ظ‹|ط§ظ‡ظ„ط§|ط£ظ‡ظ„ظ‹ط§|ظ‡ظ„ط§|ظ‡ط§ظٹ|hello|hi)"
+        r"[\sطŒ,:.!طں-]*)+",
         "",
         title,
         flags=re.IGNORECASE,
     ).strip()
-    title = re.sub(r"^(?:يا\s+)?(?:جميل|فهيم)[\s،,:.!؟-]*", "", title).strip()
+    title = re.sub(r"^(?:ظٹط§\s+)?(?:ط¬ظ…ظٹظ„|ظپظ‡ظٹظ…)[\sطŒ,:.!طں-]*", "", title).strip()
     title = re.sub(
-        r"^(?:كيفك|كيف حالك|شو أخبارك|شو اخبارك|كيف الأمور|كيف الامور)"
-        r"[\s،,:.!؟-]*",
+        r"^(?:ظƒظٹظپظƒ|ظƒظٹظپ ط­ط§ظ„ظƒ|ط´ظˆ ط£ط®ط¨ط§ط±ظƒ|ط´ظˆ ط§ط®ط¨ط§ط±ظƒ|ظƒظٹظپ ط§ظ„ط£ظ…ظˆط±|ظƒظٹظپ ط§ظ„ط§ظ…ظˆط±)"
+        r"[\sطŒ,:.!طں-]*",
         "",
         title,
     ).strip()
     if not title or re.fullmatch(
-        r"(?:كيفك|كيف حالك|شو أخبارك|شو اخبارك|كيف الأمور|كيف الامور)"
-        r"[؟?!.\s]*",
+        r"(?:ظƒظٹظپظƒ|ظƒظٹظپ ط­ط§ظ„ظƒ|ط´ظˆ ط£ط®ط¨ط§ط±ظƒ|ط´ظˆ ط§ط®ط¨ط§ط±ظƒ|ظƒظٹظپ ط§ظ„ط£ظ…ظˆط±|ظƒظٹظپ ط§ظ„ط§ظ…ظˆط±)"
+        r"[طں?!.\s]*",
         title,
     ):
-        return "محادثة جديدة"
+        return "ظ…ط­ط§ط¯ط«ط© ط¬ط¯ظٹط¯ط©"
     return title[:MAX_TITLE_LENGTH].rstrip()
 
 def generate_conversation_title(message, answer):
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip()
     title_input = (
-        "اكتب عنوانًا لهذه المحادثة يصف موضوعها العام بدقة، اعتمادًا على أول رسالة "
-        "ورد فهيم. لا تكتب إجابة الطالب ولا تلخص المحادثة كاملة. أعد العنوان فقط "
-        "بالعربية، من 3 إلى 8 كلمات، دون علامات اقتباس أو ترقيم.\n\n"
-        f"أول رسالة من الطالب:\n{message[:2000]}\n\n"
-        f"رد فهيم:\n{answer[:2000]}"
+        "ط§ظƒطھط¨ ط¹ظ†ظˆط§ظ†ظ‹ط§ ظ„ظ‡ط°ظ‡ ط§ظ„ظ…ط­ط§ط¯ط«ط© ظٹطµظپ ظ…ظˆط¶ظˆط¹ظ‡ط§ ط§ظ„ط¹ط§ظ… ط¨ط¯ظ‚ط©طŒ ط§ط¹طھظ…ط§ط¯ظ‹ط§ ط¹ظ„ظ‰ ط£ظˆظ„ ط±ط³ط§ظ„ط© "
+        "ظˆط±ط¯ ظپظ‡ظٹظ…. ظ„ط§ طھظƒطھط¨ ط¥ط¬ط§ط¨ط© ط§ظ„ط·ط§ظ„ط¨ ظˆظ„ط§ طھظ„ط®طµ ط§ظ„ظ…ط­ط§ط¯ط«ط© ظƒط§ظ…ظ„ط©. ط£ط¹ط¯ ط§ظ„ط¹ظ†ظˆط§ظ† ظپظ‚ط· "
+        "ط¨ط§ظ„ط¹ط±ط¨ظٹط©طŒ ظ…ظ† 3 ط¥ظ„ظ‰ 8 ظƒظ„ظ…ط§طھطŒ ط¯ظˆظ† ط¹ظ„ط§ظ…ط§طھ ط§ظ‚طھط¨ط§ط³ ط£ظˆ طھط±ظ‚ظٹظ….\n\n"
+        f"ط£ظˆظ„ ط±ط³ط§ظ„ط© ظ…ظ† ط§ظ„ط·ط§ظ„ط¨:\n{message[:2000]}\n\n"
+        f"ط±ط¯ ظپظ‡ظٹظ…:\n{answer[:2000]}"
     )
     request = Request(
         API_URL,
@@ -548,8 +464,8 @@ def generate_conversation_title(message, answer):
                 "model": model,
                 "input": title_input,
                 "system_instruction": (
-                    "أنت تنشئ عناوين قصيرة ودقيقة لمحادثات مساعد دراسي. "
-                    "استخرج الموضوع الأساسي ولا تضف موضوعًا غير موجود."
+                    "ط£ظ†طھ طھظ†ط´ط¦ ط¹ظ†ط§ظˆظٹظ† ظ‚طµظٹط±ط© ظˆط¯ظ‚ظٹظ‚ط© ظ„ظ…ط­ط§ط¯ط«ط§طھ ظ…ط³ط§ط¹ط¯ ط¯ط±ط§ط³ظٹ. "
+                    "ط§ط³طھط®ط±ط¬ ط§ظ„ظ…ظˆط¶ظˆط¹ ط§ظ„ط£ط³ط§ط³ظٹ ظˆظ„ط§ طھط¶ظپ ظ…ظˆط¶ظˆط¹ظ‹ط§ ط؛ظٹط± ظ…ظˆط¬ظˆط¯."
                 ),
             }
         ).encode("utf-8"),
@@ -563,14 +479,14 @@ def generate_conversation_title(message, answer):
         with urlopen(request, timeout=45) as response:
             interaction = json.loads(response.read())
     except HTTPError as error:
-        raise RuntimeError(f"رفضت خدمة Gemini إنشاء عنوان (HTTP {error.code}).") from error
+        raise RuntimeError(f"ط±ظپط¶طھ ط®ط¯ظ…ط© Gemini ط¥ظ†ط´ط§ط، ط¹ظ†ظˆط§ظ† (HTTP {error.code}).") from error
     except (URLError, TimeoutError) as error:
-        raise RuntimeError(f"تعذّر الاتصال بخدمة Gemini لإنشاء عنوان: {error}") from error
+        raise RuntimeError(f"طھط¹ط°ظ‘ط± ط§ظ„ط§طھطµط§ظ„ ط¨ط®ط¯ظ…ط© Gemini ظ„ط¥ظ†ط´ط§ط، ط¹ظ†ظˆط§ظ†: {error}") from error
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise RuntimeError("أعادت Gemini بيانات غير مفهومة للعنوان.") from error
+        raise RuntimeError("ط£ط¹ط§ط¯طھ Gemini ط¨ظٹط§ظ†ط§طھ ط؛ظٹط± ظ…ظپظ‡ظˆظ…ط© ظ„ظ„ط¹ظ†ظˆط§ظ†.") from error
 
     if not isinstance(interaction, dict):
-        raise RuntimeError("أعادت Gemini بنية غير صالحة للعنوان.")
+        raise RuntimeError("ط£ط¹ط§ط¯طھ Gemini ط¨ظ†ظٹط© ط؛ظٹط± طµط§ظ„ط­ط© ظ„ظ„ط¹ظ†ظˆط§ظ†.")
     title_parts = []
     output_text = interaction.get("output_text")
     if isinstance(output_text, str):
@@ -587,7 +503,7 @@ def generate_conversation_title(message, answer):
     title = re.sub(r"^[\s\"'`#*]+|[\s\"'`#*]+$", "", title)
     title = re.sub(r"\s+", " ", title).strip()
     if not title:
-        raise RuntimeError("لم تُرجع Gemini عنوانًا صالحًا للمحادثة.")
+        raise RuntimeError("ظ„ظ… طھظڈط±ط¬ط¹ Gemini ط¹ظ†ظˆط§ظ†ظ‹ط§ طµط§ظ„ط­ظ‹ط§ ظ„ظ„ظ…ط­ط§ط¯ط«ط©.")
     return title[:MAX_TITLE_LENGTH].rstrip()
 
 
@@ -660,7 +576,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
         user = self.current_user()
         if self.path == "/api/me":
             if not user:
-                self.send_json({"error": "سجّل الدخول للمتابعة."}, 401)
+                self.send_json({"error": "ط³ط¬ظ‘ظ„ ط§ظ„ط¯ط®ظˆظ„ ظ„ظ„ظ…طھط§ط¨ط¹ط©."}, 401)
             else:
                 self.send_json(
                     {
@@ -676,7 +592,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_unauthorized()
                 return
             if not self.is_admin(user):
-                self.send_json({"error": "ليس لديك صلاحية لفتح لوحة التحكم."}, 403)
+                self.send_json({"error": "ظ„ظٹط³ ظ„ط¯ظٹظƒ طµظ„ط§ط­ظٹط© ظ„ظپطھط­ ظ„ظˆط­ط© ط§ظ„طھط­ظƒظ…."}, 403)
                 return
             admin_email = os.environ.get("ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL).strip()
             self.send_json(get_database().admin_dashboard(admin_email))
@@ -687,7 +603,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_unauthorized()
                 return
             if not self.is_admin(user):
-                self.send_json({"error": "ليس لديك صلاحية لفتح لوحة التحكم."}, 403)
+                self.send_json({"error": "ظ„ظٹط³ ظ„ط¯ظٹظƒ طµظ„ط§ط­ظٹط© ظ„ظپطھط­ ظ„ظˆط­ط© ط§ظ„طھط­ظƒظ…."}, 403)
                 return
             self.send_json(get_database().admin_statistics())
             return
@@ -698,7 +614,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 return
             if not self.is_admin(user):
                 self.send_json(
-                    {"error": "ليس لديك صلاحية لعرض رسائل مركز المساعدة."}, 403
+                    {"error": "ظ„ظٹط³ ظ„ط¯ظٹظƒ طµظ„ط§ط­ظٹط© ظ„ط¹ط±ط¶ ط±ط³ط§ط¦ظ„ ظ…ط±ظƒط² ط§ظ„ظ…ط³ط§ط¹ط¯ط©."}, 403
                 )
                 return
             self.send_json(
@@ -722,7 +638,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 return
             record = get_database().get_conversation(user["id"], match.group(1))
             if not record:
-                self.send_json({"error": "المحادثة غير موجودة."}, 404)
+                self.send_json({"error": "ط§ظ„ظ…ط­ط§ط¯ط«ط© ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©."}, 404)
                 return
             conversation, messages = record
             self.send_json(
@@ -766,7 +682,6 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 "title_generation",
                 "prepare_user_message",
                 "conversation_context",
-                "curriculum_retrieval",
                 "conversation_images",
                 "gemini_first_byte",
                 "gemini_total",
@@ -827,7 +742,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             return
         if self.path != "/api/chat":
-            self.send_json({"error": "المسار غير موجود."}, 404)
+            self.send_json({"error": "ط§ظ„ظ…ط³ط§ط± ط؛ظٹط± ظ…ظˆط¬ظˆط¯."}, 404)
             return
 
         user = self.current_user()
@@ -841,7 +756,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
 
         message = payload.get("message")
         if not isinstance(message, str):
-            self.send_json({"error": "صيغة الرسالة غير صالحة."}, 400)
+            self.send_json({"error": "طµظٹط؛ط© ط§ظ„ط±ط³ط§ظ„ط© ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
             return
 
         conversation_id = payload.get("conversationId")
@@ -849,7 +764,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             not isinstance(conversation_id, str)
             or not re.fullmatch(r"[a-f0-9]{32}", conversation_id)
         ):
-            self.send_json({"error": "مرجع المحادثة غير صالح."}, 400)
+            self.send_json({"error": "ظ…ط±ط¬ط¹ ط§ظ„ظ…ط­ط§ط¯ط«ط© ط؛ظٹط± طµط§ظ„ط­."}, 400)
             return
 
         current_parts = []
@@ -860,21 +775,21 @@ class ChatHandler(SimpleHTTPRequestHandler):
         attachment = payload.get("file")
         if image is not None:
             if not isinstance(image, dict):
-                self.send_json({"error": "بيانات الصورة غير صالحة."}, 400)
+                self.send_json({"error": "ط¨ظٹط§ظ†ط§طھ ط§ظ„طµظˆط±ط© ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
                 return
             mime_type = image.get("mimeType")
             data = image.get("data")
             if mime_type not in ALLOWED_IMAGE_TYPES or not isinstance(data, str):
-                self.send_json({"error": "صيغة الصورة غير مدعومة."}, 400)
+                self.send_json({"error": "طµظٹط؛ط© ط§ظ„طµظˆط±ط© ط؛ظٹط± ظ…ط¯ط¹ظˆظ…ط©."}, 400)
                 return
             try:
                 image_bytes = base64.b64decode(data, validate=True)
             except (binascii.Error, ValueError):
-                self.send_json({"error": "تعذّر قراءة الصورة."}, 400)
+                self.send_json({"error": "طھط¹ط°ظ‘ط± ظ‚ط±ط§ط،ط© ط§ظ„طµظˆط±ط©."}, 400)
                 return
             if not image_bytes or len(image_bytes) > MAX_IMAGE_BYTES:
                 self.send_json(
-                    {"error": "يجب ألا يتجاوز حجم الصورة 8 ميغابايت."}, 413
+                    {"error": "ظٹط¬ط¨ ط£ظ„ط§ ظٹطھط¬ط§ظˆط² ط­ط¬ظ… ط§ظ„طµظˆط±ط© 8 ظ…ظٹط؛ط§ط¨ط§ظٹطھ."}, 413
                 )
                 return
             current_parts.append(
@@ -888,10 +803,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
         file_name = None
         if attachment is not None:
             if image is not None:
-                self.send_json({"error": "أرفق صورة أو ملفًا واحدًا في كل مرة."}, 400)
+                self.send_json({"error": "ط£ط±ظپظ‚ طµظˆط±ط© ط£ظˆ ظ…ظ„ظپظ‹ط§ ظˆط§ط­ط¯ظ‹ط§ ظپظٹ ظƒظ„ ظ…ط±ط©."}, 400)
                 return
             if not isinstance(attachment, dict):
-                self.send_json({"error": "بيانات الملف غير صالحة."}, 400)
+                self.send_json({"error": "ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ظ„ظپ ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
                 return
             file_name = attachment.get("name")
             file_mime = attachment.get("mimeType")
@@ -905,15 +820,15 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 or file_mime not in ALLOWED_DOCUMENT_TYPES
                 or not isinstance(file_data, str)
             ):
-                self.send_json({"error": "نوع الملف غير مدعوم."}, 400)
+                self.send_json({"error": "ظ†ظˆط¹ ط§ظ„ظ…ظ„ظپ ط؛ظٹط± ظ…ط¯ط¹ظˆظ…."}, 400)
                 return
             try:
                 document_bytes = base64.b64decode(file_data, validate=True)
             except (binascii.Error, ValueError):
-                self.send_json({"error": "تعذّرت قراءة الملف."}, 400)
+                self.send_json({"error": "طھط¹ط°ظ‘ط±طھ ظ‚ط±ط§ط،ط© ط§ظ„ظ…ظ„ظپ."}, 400)
                 return
             if not document_bytes or len(document_bytes) > MAX_DOCUMENT_BYTES:
-                self.send_json({"error": "يجب ألا يتجاوز حجم الملف 8 ميغابايت."}, 413)
+                self.send_json({"error": "ظٹط¬ط¨ ط£ظ„ط§ ظٹطھط¬ط§ظˆط² ط­ط¬ظ… ط§ظ„ظ…ظ„ظپ 8 ظ…ظٹط؛ط§ط¨ط§ظٹطھ."}, 413)
                 return
             current_parts.append(
                 {
@@ -924,7 +839,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
 
         if not current_parts:
-            self.send_json({"error": "اكتب رسالة أو أرفق صورة أو ملفًا قبل الإرسال."}, 400)
+            self.send_json({"error": "ط§ظƒطھط¨ ط±ط³ط§ظ„ط© ط£ظˆ ط£ط±ظپظ‚ طµظˆط±ط© ط£ظˆ ظ…ظ„ظپظ‹ط§ ظ‚ط¨ظ„ ط§ظ„ط¥ط±ط³ط§ظ„."}, 400)
             return
         generate_image = (
             payload.get("generateImage") is True or wants_image_generation(message)
@@ -932,7 +847,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
         student_started = time.perf_counter()
         student_preferences = get_database().get_student_preferences(user["id"])
         if not student_preferences:
-            self.send_json({"error": "تعذّر تحميل إعدادات حساب الطالب."}, 500)
+            self.send_json({"error": "طھط¹ط°ظ‘ط± طھط­ظ…ظٹظ„ ط¥ط¹ط¯ط§ط¯ط§طھ ط­ط³ط§ط¨ ط§ظ„ط·ط§ظ„ط¨."}, 500)
             return
         student_grade = extract_student_grade(message)
         if (
@@ -947,7 +862,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             if not student_preferences:
                 self.send_json(
-                    {"error": "تعذّر تحميل إعدادات حساب الطالب."}, 500
+                    {"error": "طھط¹ط°ظ‘ط± طھط­ظ…ظٹظ„ ط¥ط¹ط¯ط§ط¯ط§طھ ط­ط³ط§ط¨ ط§ظ„ط·ط§ظ„ط¨."}, 500
                 )
                 return
         self._record_chat_perf("student_preferences", student_started)
@@ -961,9 +876,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
             title_message = saved_message
             if file_name:
                 saved_message = "\n".join(
-                    part for part in (saved_message, f"مرفق ملف: {file_name}") if part
+                    part for part in (saved_message, f"ظ…ط±ظپظ‚ ظ…ظ„ظپ: {file_name}") if part
                 )
-                title_message = title_message or f"ملف {file_name}"
+                title_message = title_message or f"ظ…ظ„ظپ {file_name}"
             title_started = time.perf_counter()
             local_title = make_conversation_title(
                 title_message, image is not None
@@ -980,10 +895,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             self._record_chat_perf("prepare_user_message", prepare_started)
         except Database.error_types:
-            self.send_json({"error": "تعذّر حفظ الرسالة في قاعدة البيانات."}, 500)
+            self.send_json({"error": "طھط¹ط°ظ‘ط± ط­ظپط¸ ط§ظ„ط±ط³ط§ظ„ط© ظپظٹ ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ."}, 500)
             return
         if not stored:
-            self.send_json({"error": "المحادثة غير موجودة."}, 404)
+            self.send_json({"error": "ط§ظ„ظ…ط­ط§ط¯ط«ط© ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©."}, 404)
             return
 
         model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
@@ -992,7 +907,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
             for character in model
         ):
-            self.send_json({"error": "اسم نموذج Gemini في الإعدادات غير صالح."}, 500)
+            self.send_json({"error": "ط§ط³ظ… ظ†ظ…ظˆط°ط¬ Gemini ظپظٹ ط§ظ„ط¥ط¹ط¯ط§ط¯ط§طھ ط؛ظٹط± طµط§ظ„ط­."}, 500)
             return
 
         stored["user_id"] = user["id"]
@@ -1008,8 +923,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json(
                 {
                     "error": (
-                        "أضف مفتاح Gemini في GEMINI_API_KEY داخل ملف .env "
-                        "ثم أعد تشغيل الخادم."
+                        "ط£ط¶ظپ ظ…ظپطھط§ط­ Gemini ظپظٹ GEMINI_API_KEY ط¯ط§ط®ظ„ ظ…ظ„ظپ .env "
+                        "ط«ظ… ط£ط¹ط¯ طھط´ط؛ظٹظ„ ط§ظ„ط®ط§ط¯ظ…."
                     )
                 },
                 503,
@@ -1023,7 +938,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             self._record_chat_perf("conversation_context", context_started)
             if not context_rows:
-                self.send_json({"error": "المحادثة غير موجودة."}, 404)
+                self.send_json({"error": "ط§ظ„ظ…ط­ط§ط¯ط«ط© ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©."}, 404)
                 return
             context_messages = [dict(row) for row in context_rows]
             previous_messages = [
@@ -1040,17 +955,6 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 user_greeted=user_starts_with_greeting(message),
                 asks_identity=user_asks_assistant_identity(message),
             )
-            curriculum_started = time.perf_counter()
-            curriculum = retrieve_curriculum(
-                get_database(),
-                message.strip(),
-                student_preferences["grade"],
-                api_key,
-                conversation_history=previous_messages,
-            )
-            self._record_chat_perf("curriculum_retrieval", curriculum_started)
-            if curriculum["system_note"]:
-                system_instruction += " " + curriculum["system_note"]
             images_started = time.perf_counter()
             relevant_images = select_prior_images(previous_messages, message)
             selected_prior_images = select_images_that_fit(
@@ -1060,8 +964,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_json(
                     {
                         "error": (
-                            "الصور السابقة المطلوبة تتجاوز حد حجم Gemini. "
-                            "أرسل الصور المطلوبة في رسائل أقل أو اختر الصور اللازمة فقط."
+                            "ط§ظ„طµظˆط± ط§ظ„ط³ط§ط¨ظ‚ط© ط§ظ„ظ…ط·ظ„ظˆط¨ط© طھطھط¬ط§ظˆط² ط­ط¯ ط­ط¬ظ… Gemini. "
+                            "ط£ط±ط³ظ„ ط§ظ„طµظˆط± ط§ظ„ظ…ط·ظ„ظˆط¨ط© ظپظٹ ط±ط³ط§ط¦ظ„ ط£ظ‚ظ„ ط£ظˆ ط§ط®طھط± ط§ظ„طµظˆط± ط§ظ„ظ„ط§ط²ظ…ط© ظپظ‚ط·."
                         )
                     },
                     413,
@@ -1081,28 +985,18 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     context_message["image_data"] = None
             self._record_chat_perf("conversation_images", images_started)
         except Database.error_types:
-            self.send_json({"error": "تعذّر استرجاع سياق المحادثة من قاعدة البيانات."}, 500)
-            return
-        except CurriculumError as error:
-            self.send_json(
-                {"error": f"تعذّر البحث في محتوى المنهج الآن: {error}"},
-                503,
-            )
-            return
-
-        try:
+            self.send_json({"error": "طھط¹ط°ظ‘ط± ط§ط³طھط±ط¬ط§ط¹ ط³ظٹط§ظ‚ ط§ظ„ظ…ط­ط§ط¯ط«ط© ظ…ظ† ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ."}, 500)
+            returntry:
             request_input = build_conversation_input(
                 context_messages,
                 stored["message_id"],
                 message.strip(),
                 current_parts,
                 system_instruction,
-                extra_parts=curriculum["extra_parts"],
             )
         except ValueError as error:
             self.send_json({"error": str(error)}, 413)
             return
-        stored["curriculum"] = curriculum
         request_payload = {
             "model": model,
             "input": request_input,
@@ -1111,7 +1005,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
         }
         request_data = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
         if len(request_data) > MAX_GEMINI_REQUEST_BYTES:
-            self.send_json({"error": "تجاوز حجم السياق حد طلب Gemini."}, 413)
+            self.send_json({"error": "طھط¬ط§ظˆط² ط­ط¬ظ… ط§ظ„ط³ظٹط§ظ‚ ط­ط¯ ط·ظ„ط¨ Gemini."}, 413)
             return
         request = Request(
             API_URL,
@@ -1146,7 +1040,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 completed = self.stream_gemini_response(response, stored)
                 if not completed:
                     self.send_sse(
-                        "error", {"error": "انقطع اتصال Gemini قبل اكتمال الإجابة."}
+                        "error", {"error": "ط§ظ†ظ‚ط·ط¹ ط§طھطµط§ظ„ Gemini ظ‚ط¨ظ„ ط§ظƒطھظ…ط§ظ„ ط§ظ„ط¥ط¬ط§ط¨ط©."}
                     )
                 return
         except HTTPError as error:
@@ -1161,12 +1055,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
             ):
                 detail = None
             self.send_json(
-                {"error": detail or f"رفضت خدمة Gemini الطلب (HTTP {error.code})."},
+                {"error": detail or f"ط±ظپط¶طھ ط®ط¯ظ…ط© Gemini ط§ظ„ط·ظ„ط¨ (HTTP {error.code})."},
                 error.code if 400 <= error.code < 600 else 502,
             )
             return
         except (URLError, TimeoutError) as error:
-            self.send_json({"error": f"تعذّر الاتصال بخدمة Gemini: {error}"}, 502)
+            self.send_json({"error": f"طھط¹ط°ظ‘ط± ط§ظ„ط§طھطµط§ظ„ ط¨ط®ط¯ظ…ط© Gemini: {error}"}, 502)
             return
         except (BrokenPipeError, ConnectionResetError):
             return
@@ -1174,12 +1068,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
             if stream_started:
                 try:
                     self.send_sse(
-                        "error", {"error": "تعذّر إكمال الإجابة بسبب خطأ داخلي."}
+                        "error", {"error": "طھط¹ط°ظ‘ط± ط¥ظƒظ…ط§ظ„ ط§ظ„ط¥ط¬ط§ط¨ط© ط¨ط³ط¨ط¨ ط®ط·ط£ ط¯ط§ط®ظ„ظٹ."}
                     )
                 except (BrokenPipeError, ConnectionResetError):
                     pass
             else:
-                self.send_json({"error": "تعذّر بدء بث Gemini."}, 502)
+                self.send_json({"error": "طھط¹ط°ظ‘ط± ط¨ط¯ط، ط¨ط« Gemini."}, 502)
             return
 
     def do_PATCH(self):
@@ -1193,7 +1087,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 return
             if not self.is_admin(user):
                 self.send_json(
-                    {"error": "ليس لديك صلاحية لإدارة رسائل مركز المساعدة."}, 403
+                    {"error": "ظ„ظٹط³ ظ„ط¯ظٹظƒ طµظ„ط§ط­ظٹط© ظ„ط¥ط¯ط§ط±ط© ط±ط³ط§ط¦ظ„ ظ…ط±ظƒط² ط§ظ„ظ…ط³ط§ط¹ط¯ط©."}, 403
                 )
                 return
             payload = self.read_json_body()
@@ -1201,19 +1095,19 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 return
             status = payload.get("status")
             if status not in {"new", "resolved"}:
-                self.send_json({"error": "حالة الرسالة غير صالحة."}, 400)
+                self.send_json({"error": "ط­ط§ظ„ط© ط§ظ„ط±ط³ط§ظ„ط© ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
                 return
             if not get_database().set_support_message_status(
                 int(support_match.group(1)), status
             ):
-                self.send_json({"error": "رسالة مركز المساعدة غير موجودة."}, 404)
+                self.send_json({"error": "ط±ط³ط§ظ„ط© ظ…ط±ظƒط² ط§ظ„ظ…ط³ط§ط¹ط¯ط© ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©."}, 404)
                 return
             self.send_json({"ok": True, "status": status})
             return
 
         match = re.fullmatch(r"/api/conversations/([a-f0-9]{32})", self.path)
         if not match:
-            self.send_json({"error": "المسار غير موجود."}, 404)
+            self.send_json({"error": "ط§ظ„ظ…ط³ط§ط± ط؛ظٹط± ظ…ظˆط¬ظˆط¯."}, 404)
             return
         user = self.current_user()
         if not user:
@@ -1224,19 +1118,19 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         title = payload.get("title")
         if not isinstance(title, str) or not title.strip():
-            self.send_json({"error": "اكتب عنوانًا للمحادثة."}, 400)
+            self.send_json({"error": "ط§ظƒطھط¨ ط¹ظ†ظˆط§ظ†ظ‹ط§ ظ„ظ„ظ…ط­ط§ط¯ط«ط©."}, 400)
             return
         title = re.sub(r"\s+", " ", title.strip())
         if len(title) > MAX_TITLE_LENGTH:
             self.send_json(
-                {"error": f"يجب ألا يتجاوز العنوان {MAX_TITLE_LENGTH} حرفًا."}, 400
+                {"error": f"ظٹط¬ط¨ ط£ظ„ط§ ظٹطھط¬ط§ظˆط² ط§ظ„ط¹ظ†ظˆط§ظ† {MAX_TITLE_LENGTH} ط­ط±ظپظ‹ط§."}, 400
             )
             return
         updated_title = get_database().rename_conversation(
             user["id"], match.group(1), title
         )
         if not updated_title:
-            self.send_json({"error": "المحادثة غير موجودة."}, 404)
+            self.send_json({"error": "ط§ظ„ظ…ط­ط§ط¯ط«ط© ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©."}, 404)
             return
         self.send_json({"ok": True, "title": updated_title})
 
@@ -1248,11 +1142,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_unauthorized()
                 return
             if not self.is_admin(user):
-                self.send_json({"error": "ليس لديك صلاحية لحذف المستخدمين."}, 403)
+                self.send_json({"error": "ظ„ظٹط³ ظ„ط¯ظٹظƒ طµظ„ط§ط­ظٹط© ظ„ط­ط°ظپ ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ†."}, 403)
                 return
             target_user_id = admin_match.group(1)
             if target_user_id == user["id"]:
-                self.send_json({"error": "لا يمكنك حذف حساب الأدمن من لوحة التحكم."}, 400)
+                self.send_json({"error": "ظ„ط§ ظٹظ…ظƒظ†ظƒ ط­ط°ظپ ط­ط³ط§ط¨ ط§ظ„ط£ط¯ظ…ظ† ظ…ظ† ظ„ظˆط­ط© ط§ظ„طھط­ظƒظ…."}, 400)
                 return
             primary_admin_email = os.environ.get(
                 "ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL
@@ -1264,17 +1158,17 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             if result == "primary_admin":
                 self.send_json(
-                    {"error": "لا يمكن حذف حساب الأدمن الأساسي."}, 400
+                    {"error": "ظ„ط§ ظٹظ…ظƒظ† ط­ط°ظپ ط­ط³ط§ط¨ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط£ط³ط§ط³ظٹ."}, 400
                 )
                 return
             if result == "target_admin":
                 self.send_json(
-                    {"error": "الأدمن غير الأساسي لا يمكنه حذف حساب أدمن آخر."},
+                    {"error": "ط§ظ„ط£ط¯ظ…ظ† ط؛ظٹط± ط§ظ„ط£ط³ط§ط³ظٹ ظ„ط§ ظٹظ…ظƒظ†ظ‡ ط­ط°ظپ ط­ط³ط§ط¨ ط£ط¯ظ…ظ† ط¢ط®ط±."},
                     403,
                 )
                 return
             if result == "not_found":
-                self.send_json({"error": "المستخدم غير موجود."}, 404)
+                self.send_json({"error": "ط§ظ„ظ…ط³طھط®ط¯ظ… ط؛ظٹط± ظ…ظˆط¬ظˆط¯."}, 404)
                 return
             self.send_response(204)
             self.send_header("Cache-Control", "no-store")
@@ -1283,14 +1177,14 @@ class ChatHandler(SimpleHTTPRequestHandler):
 
         match = re.fullmatch(r"/api/conversations/([a-f0-9]{32})", self.path)
         if not match:
-            self.send_json({"error": "المسار غير موجود."}, 404)
+            self.send_json({"error": "ط§ظ„ظ…ط³ط§ط± ط؛ظٹط± ظ…ظˆط¬ظˆط¯."}, 404)
             return
         user = self.current_user()
         if not user:
             self.send_unauthorized()
             return
         if not get_database().delete_conversation(user["id"], match.group(1)):
-            self.send_json({"error": "المحادثة غير موجودة."}, 404)
+            self.send_json({"error": "ط§ظ„ظ…ط­ط§ط¯ط«ط© ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©."}, 404)
             return
         self.send_response(204)
         self.send_header("Cache-Control", "no-store")
@@ -1303,26 +1197,26 @@ class ChatHandler(SimpleHTTPRequestHandler):
         email = payload.get("email")
         password = payload.get("password")
         if not isinstance(email, str) or not isinstance(password, str):
-            self.send_json({"error": "أدخل البريد الإلكتروني وكلمة المرور."}, 400)
+            self.send_json({"error": "ط£ط¯ط®ظ„ ط§ظ„ط¨ط±ظٹط¯ ط§ظ„ط¥ظ„ظƒطھط±ظˆظ†ظٹ ظˆظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±."}, 400)
             return None
         email = email.strip().casefold()
         if (
             len(email) > 254
             or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
         ):
-            self.send_json({"error": "أدخل عنوان بريد إلكتروني صالحًا."}, 400)
+            self.send_json({"error": "ط£ط¯ط®ظ„ ط¹ظ†ظˆط§ظ† ط¨ط±ظٹط¯ ط¥ظ„ظƒطھط±ظˆظ†ظٹ طµط§ظ„ط­ظ‹ط§."}, 400)
             return None
         if not password or len(password) > 128:
-            self.send_json({"error": "كلمة المرور غير صالحة."}, 400)
+            self.send_json({"error": "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
             return None
         try:
             password.encode("utf-8")
         except UnicodeEncodeError:
-            self.send_json({"error": "استخدم أحرفًا صالحة في كلمة المرور."}, 400)
+            self.send_json({"error": "ط§ط³طھط®ط¯ظ… ط£ط­ط±ظپظ‹ط§ طµط§ظ„ط­ط© ظپظٹ ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±."}, 400)
             return None
         remember = payload.get("remember", True)
         if not isinstance(remember, bool):
-            self.send_json({"error": "إعداد تذكّر الجهاز غير صالح."}, 400)
+            self.send_json({"error": "ط¥ط¹ط¯ط§ط¯ طھط°ظƒظ‘ط± ط§ظ„ط¬ظ‡ط§ط² ط؛ظٹط± طµط§ظ„ط­."}, 400)
             return None
         return email, password, remember
 
@@ -1360,7 +1254,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         if not self.is_admin(user):
             self.send_json(
-                {"error": "ليس لديك صلاحية لإدارة صلاحيات المستخدمين."}, 403
+                {"error": "ظ„ظٹط³ ظ„ط¯ظٹظƒ طµظ„ط§ط­ظٹط© ظ„ط¥ط¯ط§ط±ط© طµظ„ط§ط­ظٹط§طھ ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ†."}, 403
             )
             return
         payload = self.read_json_body()
@@ -1368,7 +1262,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         is_admin = payload.get("isAdmin")
         if not isinstance(is_admin, bool):
-            self.send_json({"error": "قيمة صلاحية الأدمن غير صالحة."}, 400)
+            self.send_json({"error": "ظ‚ظٹظ…ط© طµظ„ط§ط­ظٹط© ط§ظ„ط£ط¯ظ…ظ† ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
             return
         primary_admin_email = os.environ.get(
             "ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL
@@ -1380,16 +1274,16 @@ class ChatHandler(SimpleHTTPRequestHandler):
             primary_admin_email,
         )
         if result == "not_found":
-            self.send_json({"error": "المستخدم غير موجود."}, 404)
+            self.send_json({"error": "ط§ظ„ظ…ط³طھط®ط¯ظ… ط؛ظٹط± ظ…ظˆط¬ظˆط¯."}, 404)
             return
         if result == "self":
             self.send_json(
-                {"error": "لا يمكنك تغيير صلاحيات حسابك بنفسك."}, 400
+                {"error": "ظ„ط§ ظٹظ…ظƒظ†ظƒ طھط؛ظٹظٹط± طµظ„ط§ط­ظٹط§طھ ط­ط³ط§ط¨ظƒ ط¨ظ†ظپط³ظƒ."}, 400
             )
             return
         if result == "primary_admin":
             self.send_json(
-                {"error": "لا يمكن تغيير صلاحية الأدمن الأساسي."}, 400
+                {"error": "ظ„ط§ ظٹظ…ظƒظ† طھط؛ظٹظٹط± طµظ„ط§ط­ظٹط© ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط£ط³ط§ط³ظٹ."}, 400
             )
             return
         self.send_json({"ok": True, "isAdmin": is_admin})
@@ -1401,14 +1295,14 @@ class ChatHandler(SimpleHTTPRequestHandler):
         email, password, remember = values
         if len(password) < 10:
             self.send_json(
-                {"error": "أنشئ كلمة مرور من 10 أحرف على الأقل."}, 400
+                {"error": "ط£ظ†ط´ط¦ ظƒظ„ظ…ط© ظ…ط±ظˆط± ظ…ظ† 10 ط£ط­ط±ظپ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„."}, 400
             )
             return
         try:
             user = get_database().register_user(email, password)
         except Database.integrity_error_types:
             self.send_json(
-                {"error": "يوجد حساب مسجل بهذا البريد. سجّل الدخول بدلًا من ذلك."},
+                {"error": "ظٹظˆط¬ط¯ ط­ط³ط§ط¨ ظ…ط³ط¬ظ„ ط¨ظ‡ط°ط§ ط§ظ„ط¨ط±ظٹط¯. ط³ط¬ظ‘ظ„ ط§ظ„ط¯ط®ظˆظ„ ط¨ط¯ظ„ظ‹ط§ ظ…ظ† ط°ظ„ظƒ."},
                 409,
             )
             return
@@ -1423,8 +1317,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json(
                 {
                     "error": (
-                        "لم يتم العثور على حساب بهذا البريد الإلكتروني. "
-                        "أنشئ حسابًا جديدًا للمتابعة."
+                        "ظ„ظ… ظٹطھظ… ط§ظ„ط¹ط«ظˆط± ط¹ظ„ظ‰ ط­ط³ط§ط¨ ط¨ظ‡ط°ط§ ط§ظ„ط¨ط±ظٹط¯ ط§ظ„ط¥ظ„ظƒطھط±ظˆظ†ظٹ. "
+                        "ط£ظ†ط´ط¦ ط­ط³ط§ط¨ظ‹ط§ ط¬ط¯ظٹط¯ظ‹ط§ ظ„ظ„ظ…طھط§ط¨ط¹ط©."
                     )
                 },
                 404,
@@ -1432,7 +1326,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         user = get_database().login_user(email, password)
         if not user:
-            self.send_json({"error": "البريد الإلكتروني أو كلمة المرور غير صحيحة."}, 401)
+            self.send_json({"error": "ط§ظ„ط¨ط±ظٹط¯ ط§ظ„ط¥ظ„ظƒطھط±ظˆظ†ظٹ ط£ظˆ ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ط؛ظٹط± طµط­ظٹط­ط©."}, 401)
             return
         self.send_authenticated_user(user, remember)
 
@@ -1442,14 +1336,14 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         email = payload.get("email")
         if not isinstance(email, str):
-            self.send_json({"error": "أدخل بريدًا إلكترونيًا صالحًا."}, 400)
+            self.send_json({"error": "ط£ط¯ط®ظ„ ط¨ط±ظٹط¯ظ‹ط§ ط¥ظ„ظƒطھط±ظˆظ†ظٹظ‹ط§ طµط§ظ„ط­ظ‹ط§."}, 400)
             return
         email = email.strip().casefold()
         if (
             len(email) > 254
             or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
         ):
-            self.send_json({"error": "أدخل بريدًا إلكترونيًا صالحًا."}, 400)
+            self.send_json({"error": "ط£ط¯ط®ظ„ ط¨ط±ظٹط¯ظ‹ط§ ط¥ظ„ظƒطھط±ظˆظ†ظٹظ‹ط§ طµط§ظ„ط­ظ‹ط§."}, 400)
             return
 
         code = f"{secrets.randbelow(1_000_000):06d}"
@@ -1467,7 +1361,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     f"{type(error).__name__}"
                 )
                 self.send_json(
-                    {"error": "تعذّر إرسال رمز التحقق حاليًا. حاول مرة أخرى لاحقًا."},
+                    {"error": "طھط¹ط°ظ‘ط± ط¥ط±ط³ط§ظ„ ط±ظ…ط² ط§ظ„طھط­ظ‚ظ‚ ط­ط§ظ„ظٹظ‹ط§. ط­ط§ظˆظ„ ظ…ط±ط© ط£ط®ط±ظ‰ ظ„ط§ط­ظ‚ظ‹ط§."},
                     503,
                 )
                 return
@@ -1476,8 +1370,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
             {
                 "ok": True,
                 "message": (
-                    "إذا كان البريد مرتبطًا بحساب، فسيصلك رمز تحقق صالح لمدة "
-                    "10 دقائق. افحص بريدك الوارد ومجلد الرسائل غير المرغوب فيها."
+                    "ط¥ط°ط§ ظƒط§ظ† ط§ظ„ط¨ط±ظٹط¯ ظ…ط±طھط¨ط·ظ‹ط§ ط¨ط­ط³ط§ط¨طŒ ظپط³ظٹطµظ„ظƒ ط±ظ…ط² طھط­ظ‚ظ‚ طµط§ظ„ط­ ظ„ظ…ط¯ط© "
+                    "10 ط¯ظ‚ط§ط¦ظ‚. ط§ظپط­طµ ط¨ط±ظٹط¯ظƒ ط§ظ„ظˆط§ط±ط¯ ظˆظ…ط¬ظ„ط¯ ط§ظ„ط±ط³ط§ط¦ظ„ ط؛ظٹط± ط§ظ„ظ…ط±ط؛ظˆط¨ ظپظٹظ‡ط§."
                 ),
             }
         )
@@ -1491,7 +1385,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
         new_password = payload.get("newPassword")
         if not all(isinstance(value, str) for value in (email, code, new_password)):
             self.send_json(
-                {"error": "أدخل البريد الإلكتروني ورمز التحقق وكلمة المرور الجديدة."},
+                {"error": "ط£ط¯ط®ظ„ ط§ظ„ط¨ط±ظٹط¯ ط§ظ„ط¥ظ„ظƒطھط±ظˆظ†ظٹ ظˆط±ظ…ط² ط§ظ„طھط­ظ‚ظ‚ ظˆظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ط§ظ„ط¬ط¯ظٹط¯ط©."},
                 400,
             )
             return
@@ -1501,22 +1395,22 @@ class ChatHandler(SimpleHTTPRequestHandler):
             len(email) > 254
             or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
         ):
-            self.send_json({"error": "أدخل بريدًا إلكترونيًا صالحًا."}, 400)
+            self.send_json({"error": "ط£ط¯ط®ظ„ ط¨ط±ظٹط¯ظ‹ط§ ط¥ظ„ظƒطھط±ظˆظ†ظٹظ‹ط§ طµط§ظ„ط­ظ‹ط§."}, 400)
             return
         if not re.fullmatch(r"[0-9]{6}", code):
-            self.send_json({"error": "رمز التحقق يجب أن يتكون من 6 أرقام."}, 400)
+            self.send_json({"error": "ط±ظ…ط² ط§ظ„طھط­ظ‚ظ‚ ظٹط¬ط¨ ط£ظ† ظٹطھظƒظˆظ† ظ…ظ† 6 ط£ط±ظ‚ط§ظ…."}, 400)
             return
         if not new_password or len(new_password) > 128:
-            self.send_json({"error": "كلمة المرور الجديدة غير صالحة."}, 400)
+            self.send_json({"error": "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ط§ظ„ط¬ط¯ظٹط¯ط© ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
             return
         try:
             new_password.encode("utf-8")
         except UnicodeEncodeError:
-            self.send_json({"error": "استخدم أحرفًا صالحة في كلمة المرور."}, 400)
+            self.send_json({"error": "ط§ط³طھط®ط¯ظ… ط£ط­ط±ظپظ‹ط§ طµط§ظ„ط­ط© ظپظٹ ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±."}, 400)
             return
         if len(new_password) < 10:
             self.send_json(
-                {"error": "أنشئ كلمة مرور جديدة من 10 أحرف على الأقل."}, 400
+                {"error": "ط£ظ†ط´ط¦ ظƒظ„ظ…ط© ظ…ط±ظˆط± ط¬ط¯ظٹط¯ط© ظ…ظ† 10 ط£ط­ط±ظپ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„."}, 400
             )
             return
 
@@ -1527,9 +1421,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True})
             return
         errors = {
-            "expired": "انتهت صلاحية الرمز. اطلب رمزًا جديدًا.",
-            "locked": "تم إيقاف الرمز بعد محاولات كثيرة. اطلب رمزًا جديدًا.",
-            "invalid": "رمز التحقق غير صحيح أو انتهت صلاحيته.",
+            "expired": "ط§ظ†طھظ‡طھ طµظ„ط§ط­ظٹط© ط§ظ„ط±ظ…ط². ط§ط·ظ„ط¨ ط±ظ…ط²ظ‹ط§ ط¬ط¯ظٹط¯ظ‹ط§.",
+            "locked": "طھظ… ط¥ظٹظ‚ط§ظپ ط§ظ„ط±ظ…ط² ط¨ط¹ط¯ ظ…ط­ط§ظˆظ„ط§طھ ظƒط«ظٹط±ط©. ط§ط·ظ„ط¨ ط±ظ…ط²ظ‹ط§ ط¬ط¯ظٹط¯ظ‹ط§.",
+            "invalid": "ط±ظ…ط² ط§ظ„طھط­ظ‚ظ‚ ط؛ظٹط± طµط­ظٹط­ ط£ظˆ ط§ظ†طھظ‡طھ طµظ„ط§ط­ظٹطھظ‡.",
         }
         self.send_json({"error": errors[result]}, 400)
 
@@ -1547,7 +1441,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if not isinstance(current_password, str) or not isinstance(
             new_password, str
         ):
-            self.send_json({"error": "أدخل كلمة المرور الحالية والجديدة."}, 400)
+            self.send_json({"error": "ط£ط¯ط®ظ„ ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ط§ظ„ط­ط§ظ„ظٹط© ظˆط§ظ„ط¬ط¯ظٹط¯ط©."}, 400)
             return
         if (
             not current_password
@@ -1555,22 +1449,22 @@ class ChatHandler(SimpleHTTPRequestHandler):
             or not new_password
             or len(new_password) > 128
         ):
-            self.send_json({"error": "كلمة المرور غير صالحة."}, 400)
+            self.send_json({"error": "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
             return
         try:
             current_password.encode("utf-8")
             new_password.encode("utf-8")
         except UnicodeEncodeError:
-            self.send_json({"error": "استخدم أحرفًا صالحة في كلمة المرور."}, 400)
+            self.send_json({"error": "ط§ط³طھط®ط¯ظ… ط£ط­ط±ظپظ‹ط§ طµط§ظ„ط­ط© ظپظٹ ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±."}, 400)
             return
         if len(new_password) < 10:
             self.send_json(
-                {"error": "أنشئ كلمة مرور جديدة من 10 أحرف على الأقل."}, 400
+                {"error": "ط£ظ†ط´ط¦ ظƒظ„ظ…ط© ظ…ط±ظˆط± ط¬ط¯ظٹط¯ط© ظ…ظ† 10 ط£ط­ط±ظپ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„."}, 400
             )
             return
         if new_password == current_password:
             self.send_json(
-                {"error": "اختر كلمة مرور جديدة مختلفة عن الحالية."}, 400
+                {"error": "ط§ط®طھط± ظƒظ„ظ…ط© ظ…ط±ظˆط± ط¬ط¯ظٹط¯ط© ظ…ط®طھظ„ظپط© ط¹ظ† ط§ظ„ط­ط§ظ„ظٹط©."}, 400
             )
             return
         if not get_database().change_password(
@@ -1579,7 +1473,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             new_password,
             self.session_token(),
         ):
-            self.send_json({"error": "كلمة المرور الحالية غير صحيحة."}, 400)
+            self.send_json({"error": "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ط§ظ„ط­ط§ظ„ظٹط© ط؛ظٹط± طµط­ظٹط­ط©."}, 400)
             return
         self.send_json({"ok": True})
 
@@ -1591,22 +1485,22 @@ class ChatHandler(SimpleHTTPRequestHandler):
         category = payload.get("category")
         content = payload.get("content")
         if category not in {"message", "complaint"}:
-            self.send_json({"error": "اختر نوعًا صالحًا للرسالة."}, 400)
+            self.send_json({"error": "ط§ط®طھط± ظ†ظˆط¹ظ‹ط§ طµط§ظ„ط­ظ‹ط§ ظ„ظ„ط±ط³ط§ظ„ط©."}, 400)
             return
         if not isinstance(content, str) or not content.strip():
-            self.send_json({"error": "اكتب رسالتك قبل الإرسال."}, 400)
+            self.send_json({"error": "ط§ظƒطھط¨ ط±ط³ط§ظ„طھظƒ ظ‚ط¨ظ„ ط§ظ„ط¥ط±ط³ط§ظ„."}, 400)
             return
         content = content.strip()
         if len(content) > 3000:
             self.send_json(
-                {"error": "يجب ألا تتجاوز الرسالة 3000 حرف."}, 400
+                {"error": "ظٹط¬ط¨ ط£ظ„ط§ طھطھط¬ط§ظˆط² ط§ظ„ط±ط³ط§ظ„ط© 3000 ط­ط±ظپ."}, 400
             )
             return
         if not user:
             name = payload.get("name")
             email = payload.get("email")
             if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
-                self.send_json({"error": "اكتب اسمًا صالحًا للتواصل."}, 400)
+                self.send_json({"error": "ط§ظƒطھط¨ ط§ط³ظ…ظ‹ط§ طµط§ظ„ط­ظ‹ط§ ظ„ظ„طھظˆط§طµظ„."}, 400)
                 return
             if (
                 not isinstance(email, str)
@@ -1615,7 +1509,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip()
                 )
             ):
-                self.send_json({"error": "أدخل بريدًا إلكترونيًا صالحًا."}, 400)
+                self.send_json({"error": "ط£ط¯ط®ظ„ ط¨ط±ظٹط¯ظ‹ط§ ط¥ظ„ظƒطھط±ظˆظ†ظٹظ‹ط§ طµط§ظ„ط­ظ‹ط§."}, 400)
                 return
             user = {
                 "id": None,
@@ -1628,7 +1522,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
         except Database.error_types:
             self.send_json(
-                {"error": "تعذّر حفظ رسالتك. حاول مرة أخرى."}, 500
+                {"error": "طھط¹ط°ظ‘ط± ط­ظپط¸ ط±ط³ط§ظ„طھظƒ. ط­ط§ظˆظ„ ظ…ط±ط© ط£ط®ط±ظ‰."}, 500
             )
             return
         self.send_json({"ok": True, "id": message_id}, 201)
@@ -1640,12 +1534,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         if not self.is_admin(user):
             self.send_json(
-                {"error": "ليس لديك صلاحية لتغيير كلمات مرور المستخدمين."}, 403
+                {"error": "ظ„ظٹط³ ظ„ط¯ظٹظƒ طµظ„ط§ط­ظٹط© ظ„طھط؛ظٹظٹط± ظƒظ„ظ…ط§طھ ظ…ط±ظˆط± ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ†."}, 403
             )
             return
         if target_user_id == user["id"]:
             self.send_json(
-                {"error": "استخدم إعدادات حسابك لتغيير كلمة مرورك."}, 400
+                {"error": "ط§ط³طھط®ط¯ظ… ط¥ط¹ط¯ط§ط¯ط§طھ ط­ط³ط§ط¨ظƒ ظ„طھط؛ظٹظٹط± ظƒظ„ظ…ط© ظ…ط±ظˆط±ظƒ."}, 400
             )
             return
 
@@ -1654,19 +1548,19 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         new_password = payload.get("newPassword")
         if not isinstance(new_password, str):
-            self.send_json({"error": "أدخل كلمة مرور جديدة."}, 400)
+            self.send_json({"error": "ط£ط¯ط®ظ„ ظƒظ„ظ…ط© ظ…ط±ظˆط± ط¬ط¯ظٹط¯ط©."}, 400)
             return
         if not new_password or len(new_password) > 128:
-            self.send_json({"error": "كلمة المرور الجديدة غير صالحة."}, 400)
+            self.send_json({"error": "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ط§ظ„ط¬ط¯ظٹط¯ط© ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
             return
         try:
             new_password.encode("utf-8")
         except UnicodeEncodeError:
-            self.send_json({"error": "استخدم أحرفًا صالحة في كلمة المرور."}, 400)
+            self.send_json({"error": "ط§ط³طھط®ط¯ظ… ط£ط­ط±ظپظ‹ط§ طµط§ظ„ط­ط© ظپظٹ ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±."}, 400)
             return
         if len(new_password) < 10:
             self.send_json(
-                {"error": "أنشئ كلمة مرور من 10 أحرف على الأقل."}, 400
+                {"error": "ط£ظ†ط´ط¦ ظƒظ„ظ…ط© ظ…ط±ظˆط± ظ…ظ† 10 ط£ط­ط±ظپ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„."}, 400
             )
             return
         primary_admin_email = os.environ.get(
@@ -1681,13 +1575,13 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if result == "target_admin":
             self.send_json(
                 {
-                    "error": "الأدمن غير الأساسي لا يمكنه تغيير كلمة مرور أدمن آخر."
+                    "error": "ط§ظ„ط£ط¯ظ…ظ† ط؛ظٹط± ط§ظ„ط£ط³ط§ط³ظٹ ظ„ط§ ظٹظ…ظƒظ†ظ‡ طھط؛ظٹظٹط± ظƒظ„ظ…ط© ظ…ط±ظˆط± ط£ط¯ظ…ظ† ط¢ط®ط±."
                 },
                 403,
             )
             return
         if result == "not_found":
-            self.send_json({"error": "المستخدم غير موجود."}, 404)
+            self.send_json({"error": "ط§ظ„ظ…ط³طھط®ط¯ظ… ط؛ظٹط± ظ…ظˆط¬ظˆط¯."}, 404)
             return
         self.send_json({"ok": True})
 
@@ -1713,26 +1607,26 @@ class ChatHandler(SimpleHTTPRequestHandler):
         return get_database().get_session_user(self.session_token())
 
     def send_unauthorized(self):
-        self.send_json({"error": "انتهت جلسة الدخول. سجّل الدخول مرة أخرى."}, 401)
+        self.send_json({"error": "ط§ظ†طھظ‡طھ ط¬ظ„ط³ط© ط§ظ„ط¯ط®ظˆظ„. ط³ط¬ظ‘ظ„ ط§ظ„ط¯ط®ظˆظ„ ظ…ط±ط© ط£ط®ط±ظ‰."}, 401)
 
     def read_json_body(self):
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
-            self.send_json({"error": "حجم الطلب غير صالح."}, 400)
+            self.send_json({"error": "ط­ط¬ظ… ط§ظ„ط·ظ„ط¨ ط؛ظٹط± طµط§ظ„ط­."}, 400)
             return None
         if length <= 0 or length > MAX_REQUEST_BYTES:
             self.send_json(
-                {"error": "حجم الطلب غير صالح أو يتجاوز الحد المسموح."}, 413
+                {"error": "ط­ط¬ظ… ط§ظ„ط·ظ„ط¨ ط؛ظٹط± طµط§ظ„ط­ ط£ظˆ ظٹطھط¬ط§ظˆط² ط§ظ„ط­ط¯ ط§ظ„ظ…ط³ظ…ظˆط­."}, 413
             )
             return None
         try:
             payload = json.loads(self.rfile.read(length))
         except (json.JSONDecodeError, UnicodeDecodeError):
-            self.send_json({"error": "تعذّرت قراءة بيانات الرسالة."}, 400)
+            self.send_json({"error": "طھط¹ط°ظ‘ط±طھ ظ‚ط±ط§ط،ط© ط¨ظٹط§ظ†ط§طھ ط§ظ„ط±ط³ط§ظ„ط©."}, 400)
             return None
         if not isinstance(payload, dict):
-            self.send_json({"error": "صيغة الرسالة غير صالحة."}, 400)
+            self.send_json({"error": "طµظٹط؛ط© ط§ظ„ط±ط³ط§ظ„ط© ط؛ظٹط± طµط§ظ„ط­ط©."}, 400)
             return None
         return payload
 
@@ -1743,8 +1637,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
 
     def send_image_creation_unavailable(self, conversation):
         answer = (
-            "ما بقدر أنشئ صور، لأني مساعد نصّي. "
-            "بقدر أساعدك بكتابة وصف للصورة أو تحليل صورة تبعثها."
+            "ظ…ط§ ط¨ظ‚ط¯ط± ط£ظ†ط´ط¦ طµظˆط±طŒ ظ„ط£ظ†ظٹ ظ…ط³ط§ط¹ط¯ ظ†طµظ‘ظٹ. "
+            "ط¨ظ‚ط¯ط± ط£ط³ط§ط¹ط¯ظƒ ط¨ظƒطھط§ط¨ط© ظˆطµظپ ظ„ظ„طµظˆط±ط© ط£ظˆ طھط­ظ„ظٹظ„ طµظˆط±ط© طھط¨ط¹ط«ظ‡ط§."
         )
         try:
             get_database().complete_assistant_message(
@@ -1755,7 +1649,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 grade_question_asked=conversation["mark_grade_question_asked"],
             )
         except Database.error_types:
-            self.send_json({"error": "تعذّر حفظ الرد في سجل المحادثة."}, 500)
+            self.send_json({"error": "طھط¹ط°ظ‘ط± ط­ظپط¸ ط§ظ„ط±ط¯ ظپظٹ ط³ط¬ظ„ ط§ظ„ظ…ط­ط§ط¯ط«ط©."}, 500)
             return
 
         self.send_response(200)
@@ -1790,9 +1684,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 conversation["title_source"], answer
             )
         except RuntimeError as error:
-            print(f"تعذّر إنشاء عنوان المحادثة بالذكاء الاصطناعي: {error}")
+            print(f"طھط¹ط°ظ‘ط± ط¥ظ†ط´ط§ط، ط¹ظ†ظˆط§ظ† ط§ظ„ظ…ط­ط§ط¯ط«ط© ط¨ط§ظ„ط°ظƒط§ط، ط§ظ„ط§طµط·ظ†ط§ط¹ظٹ: {error}")
             conversation["title_warning"] = (
-                "تعذّر إنشاء عنوان للمحادثة تلقائيًا؛ يمكنك تغييره من سجل المحادثات."
+                "طھط¹ط°ظ‘ط± ط¥ظ†ط´ط§ط، ط¹ظ†ظˆط§ظ† ظ„ظ„ظ…ط­ط§ط¯ط«ط© طھظ„ظ‚ط§ط¦ظٹظ‹ط§ط› ظٹظ…ظƒظ†ظƒ طھط؛ظٹظٹط±ظ‡ ظ…ظ† ط³ط¬ظ„ ط§ظ„ظ…ط­ط§ط¯ط«ط§طھ."
             )
             return conversation["title"]
         title = get_database().set_conversation_title(
@@ -1820,12 +1714,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
             try:
                 event_data = json.loads("\n".join(data_lines))
             except (json.JSONDecodeError, UnicodeDecodeError):
-                self.send_sse("error", {"error": "أعادت Gemini حدث بث غير مفهوم."})
+                self.send_sse("error", {"error": "ط£ط¹ط§ط¯طھ Gemini ط­ط¯ط« ط¨ط« ط؛ظٹط± ظ…ظپظ‡ظˆظ…."})
                 completed = True
                 return
 
             if not isinstance(event_data, dict):
-                self.send_sse("error", {"error": "أعادت Gemini حدث بث غير مفهوم."})
+                self.send_sse("error", {"error": "ط£ط¹ط§ط¯طھ Gemini ط­ط¯ط« ط¨ط« ط؛ظٹط± ظ…ظپظ‡ظˆظ…."})
                 completed = True
                 return
 
@@ -1852,10 +1746,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     interaction.get("id") if isinstance(interaction, dict) else None
                 )
                 if not answer_started:
-                    self.send_sse("error", {"error": "لم تُرجع Gemini إجابة نصية."})
+                    self.send_sse("error", {"error": "ظ„ظ… طھظڈط±ط¬ط¹ Gemini ط¥ط¬ط§ط¨ط© ظ†طµظٹط©."})
                 elif not isinstance(response_id, str) or not response_id:
                     self.send_sse(
-                        "error", {"error": "لم تُرجع Gemini معرّف المحادثة."}
+                        "error", {"error": "ظ„ظ… طھظڈط±ط¬ط¹ Gemini ظ…ط¹ط±ظ‘ظپ ط§ظ„ظ…ط­ط§ط¯ط«ط©."}
                     )
                 else:
                     try:
@@ -1876,7 +1770,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                             self._record_chat_perf("save_assistant", save_started)
                         self.send_sse(
                             "error",
-                            {"error": "وصل الرد لكن تعذّر حفظه في سجل المحادثة."},
+                            {"error": "ظˆطµظ„ ط§ظ„ط±ط¯ ظ„ظƒظ† طھط¹ط°ظ‘ط± ط­ظپط¸ظ‡ ظپظٹ ط³ط¬ظ„ ط§ظ„ظ…ط­ط§ط¯ط«ط©."},
                         )
                     else:
                         done_payload = {
@@ -1896,7 +1790,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     {
                         "error": message
                         if isinstance(message, str)
-                        else "تعذّر على Gemini إكمال الإجابة."
+                        else "طھط¹ط°ظ‘ط± ط¹ظ„ظ‰ Gemini ط¥ظƒظ…ط§ظ„ ط§ظ„ط¥ط¬ط§ط¨ط©."
                     },
                 )
                 completed = True
@@ -1906,7 +1800,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 raw_line = response.readline()
             except (URLError, TimeoutError, OSError) as error:
                 self.send_sse(
-                    "error", {"error": f"انقطع تدفق Gemini: {error}"}
+                    "error", {"error": f"ط§ظ†ظ‚ط·ط¹ طھط¯ظپظ‚ Gemini: {error}"}
                 )
                 return True
             if not raw_line:
@@ -1916,7 +1810,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             try:
                 line = raw_line.decode("utf-8").rstrip("\r\n")
             except UnicodeDecodeError:
-                self.send_sse("error", {"error": "تعذّرت قراءة تدفق Gemini."})
+                self.send_sse("error", {"error": "طھط¹ط°ظ‘ط±طھ ظ‚ط±ط§ط،ط© طھط¯ظپظ‚ Gemini."})
                 return True
 
             if not line:
@@ -1964,14 +1858,14 @@ def send_password_reset_email(recipient, code):
         raise RuntimeError("SMTP_FROM must be a valid email address.")
 
     message = EmailMessage()
-    message["Subject"] = "رمز استعادة كلمة المرور - فهيم"
+    message["Subject"] = "ط±ظ…ط² ط§ط³طھط¹ط§ط¯ط© ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± - ظپظ‡ظٹظ…"
     message["From"] = sender
     message["To"] = recipient
     message.set_content(
-        "وصلنا طلب لإعادة تعيين كلمة مرور حسابك في فهيم.\n\n"
-        f"رمز التحقق: {code}\n\n"
-        "الرمز صالح لمدة 10 دقائق، ويمكن استخدامه مرة واحدة. "
-        "إذا لم تطلب إعادة التعيين، فتجاهل هذه الرسالة."
+        "ظˆطµظ„ظ†ط§ ط·ظ„ط¨ ظ„ط¥ط¹ط§ط¯ط© طھط¹ظٹظٹظ† ظƒظ„ظ…ط© ظ…ط±ظˆط± ط­ط³ط§ط¨ظƒ ظپظٹ ظپظ‡ظٹظ….\n\n"
+        f"ط±ظ…ط² ط§ظ„طھط­ظ‚ظ‚: {code}\n\n"
+        "ط§ظ„ط±ظ…ط² طµط§ظ„ط­ ظ„ظ…ط¯ط© 10 ط¯ظ‚ط§ط¦ظ‚طŒ ظˆظٹظ…ظƒظ† ط§ط³طھط®ط¯ط§ظ…ظ‡ ظ…ط±ط© ظˆط§ط­ط¯ط©. "
+        "ط¥ط°ط§ ظ„ظ… طھط·ظ„ط¨ ط¥ط¹ط§ط¯ط© ط§ظ„طھط¹ظٹظٹظ†طŒ ظپطھط¬ط§ظ‡ظ„ ظ‡ط°ظ‡ ط§ظ„ط±ط³ط§ظ„ط©."
     )
 
     context = ssl.create_default_context()
@@ -1998,14 +1892,15 @@ def main():
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8000"))
     server = ThreadingHTTPServer((host, port), ChatHandler)
-    print(f"AI Chat يعمل على http://{host}:{port}")
+    print(f"AI Chat ظٹط¹ظ…ظ„ ط¹ظ„ظ‰ http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nتم إيقاف الخادم.")
+        print("\nطھظ… ط¥ظٹظ‚ط§ظپ ط§ظ„ط®ط§ط¯ظ….")
     finally:
         server.server_close()
 
 
 if __name__ == "__main__":
     main()
+
