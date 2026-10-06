@@ -985,8 +985,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     context_message["image_data"] = None
             self._record_chat_perf("conversation_images", images_started)
         except Database.error_types:
-            self.send_json({"error": "طھط¹ط°ظ‘ط± ط§ط³طھط±ط¬ط§ط¹ ط³ظٹط§ظ‚ ط§ظ„ظ…ط­ط§ط¯ط«ط© ظ…ظ† ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ."}, 500)
-            returntry:
+            self.send_json({"error": "طھط¹ط°ظ‘ط± ط§ط³طھط±ط¬ط§ط¹ ط³ظٹط§ظ‚ ط§ظ„ظ…ط­ط§ط¯ط«ط© ظ…ظ† ظ‚ط§ط¹ط¯طط§ظ„ط¨ظٹط§ظ†ط§طھ."}, 500)
+            return
+
+        try:
             request_input = build_conversation_input(
                 context_messages,
                 stored["message_id"],
