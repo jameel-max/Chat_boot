@@ -9,14 +9,15 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/style.css?v=23">
+    <link rel="stylesheet" href="/style.css?v=24">
+    <script>try{if(localStorage.getItem("faheem_sidebar_collapsed")==="1")document.documentElement.classList.add("sidebar-collapsed")}catch(e){}</script>
     <script
             async
             src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
     </script>
     
     <script src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
-    <script src="/app.js?v=38" defer></script>
+    <script src="/app.js?v=39" defer></script>
     <script>
       window.MathJax = {
         tex: {
@@ -44,14 +45,13 @@
   </head>
   <body>
     <main class="app-shell">
-      <aside class="sidebar" aria-label="القائمة الجانبية">
+      <aside class="sidebar" id="sidebar" aria-label="القائمة الجانبية">
         <div class="sidebar-header">
           <a class="brand" href="/" aria-label="فهيم - مساعد المدرسة">
             <img class="brand-logo" src="/school-logo.svg" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
             <span class="brand-copy"><strong>فهيم</strong><small>خريبة السوق الثانوية الثانية للبنين</small></span>
           </a>
           <button class="admin-header-button hidden" id="admin-button" type="button" aria-label="لوحة الأدمن" title="لوحة الأدمن">لوحة</button>
-          <button class="sidebar-close" id="sidebar-close" type="button" aria-label="إغلاق القائمة الجانبية"><img class="close-icon" src="/close.png" alt=""></button>
         </div>
         <button class="new-chat" id="new-chat" type="button">
           <span aria-hidden="true">＋</span> محادثة جديدة
@@ -79,7 +79,7 @@
           <div class="profile-copy"><strong id="profile-name">مساحتك الخاصة</strong></div>
           <div class="profile-settings hidden" id="profile-settings">
             <button class="profile-settings-toggle" id="profile-settings-toggle" type="button" aria-label="إعدادات الحساب" aria-expanded="false" aria-controls="profile-settings-menu" title="إعدادات الحساب">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"></path><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"></path></svg>
+              <img src="settings-svgrepo-com.svg" alt="">
             </button>
             <div class="profile-settings-menu hidden" id="profile-settings-menu">
               <button class="profile-settings-action" id="change-password-button" type="button">تغيير كلمة المرور</button>
@@ -92,7 +92,7 @@
 
       <section class="chat-panel" aria-label="محادثة فهيم">
         <header class="topbar">
-          <button class="mobile-history-toggle" id="mobile-history-toggle" type="button" aria-label="عرض سجل المحادثات" aria-expanded="false">☰</button>
+          <button class="mobile-history-toggle" id="mobile-history-toggle" type="button" aria-label="إغلاق القائمة الجانبية" aria-controls="sidebar" aria-expanded="true">☰</button>
           <div class="assistant-identity">
             <img class="mini-logo" src="/school-logo.svg" alt="">
             <div><strong>فهيم</strong><span class="model-label"><i></i> مساعدك المدرسي الذكي</span></div>

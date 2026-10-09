@@ -168,12 +168,49 @@ function renderPendingMath(element) {
   }
 }
 
-function setMobileMenuOpen(isOpen) {
-  sidebar.classList.toggle("mobile-open", isOpen);
-  sidebarBackdrop.classList.toggle("visible", isOpen);
-  mobileMenuToggle.setAttribute("aria-expanded", String(isOpen));
-  mobileMenuToggle.setAttribute("aria-label", isOpen ? "إغلاق القائمة الجانبية" : "عرض سجل المحادثات");
+const mobileMenuQuery = window.matchMedia("(max-width: 760px)");
+const SIDEBAR_COLLAPSED_KEY = "faheem_sidebar_collapsed";
+
+function isSidebarVisible() {
+  return mobileMenuQuery.matches
+    ? sidebar.classList.contains("mobile-open")
+    : !document.documentElement.classList.contains("sidebar-collapsed");
 }
+
+function syncSidebarToggle() {
+  const visible = isSidebarVisible();
+  mobileMenuToggle.setAttribute("aria-expanded", String(visible));
+  mobileMenuToggle.setAttribute(
+    "aria-label",
+    visible ? "إغلاق القائمة الجانبية" : "فتح القائمة الجانبية",
+  );
+  sidebar.inert = !visible;
+}
+
+// الهاتف: القائمة تنزلق فوق المحتوى مع خلفية معتمة
+function setMobileMenuOpen(isOpen) {
+  const open = isOpen && mobileMenuQuery.matches;
+  sidebar.classList.toggle("mobile-open", open);
+  sidebarBackdrop.classList.toggle("visible", open);
+  syncSidebarToggle();
+}
+
+// الزر الواحد: على الهاتف يفتح/يغلق الدرج، وعلى الشاشات الكبيرة يطوي/يوسّع القائمة
+function toggleSidebar() {
+  if (mobileMenuQuery.matches) {
+    setMobileMenuOpen(!sidebar.classList.contains("mobile-open"));
+    return;
+  }
+  const collapsed = document.documentElement.classList.toggle("sidebar-collapsed");
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+  }
+  syncSidebarToggle();
+}
+
+syncSidebarToggle();
+mobileMenuQuery.addEventListener("change", () => setMobileMenuOpen(false));
 
 async function loadAdminSupportMessages() {
   adminError.textContent = "";
@@ -1910,9 +1947,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-mobileMenuToggle.addEventListener("click", () => {
-  setMobileMenuOpen(!sidebar.classList.contains("mobile-open"));
-});
+mobileMenuToggle.addEventListener("click", toggleSidebar);
 historySearchToggle.addEventListener("click", () => {
   const isOpen = historySearchToggle.getAttribute("aria-expanded") !== "true";
   historySearchToggle.setAttribute("aria-expanded", String(isOpen));
@@ -1924,5 +1959,4 @@ historySearchToggle.addEventListener("click", () => {
   }
 });
 historySearch.addEventListener("input", filterHistory);
-document.querySelector("#sidebar-close").addEventListener("click", () => setMobileMenuOpen(false));
 sidebarBackdrop.addEventListener("click", () => setMobileMenuOpen(false));
