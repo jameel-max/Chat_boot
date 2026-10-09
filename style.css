@@ -153,7 +153,7 @@ button { color: inherit; }
 .message-text .faheem-table-wrap { max-width: 100%; margin: .8em 0; overflow-x: auto; border: none; outline: none; box-shadow: none; }
 .message-text .faheem-table, .message-text .faheem-table tr, .message-text .faheem-table th, .message-text .faheem-table td { border: none; outline: none; box-shadow: none; border: #99a8a8 solid 0.3px;}
 .message-text .faheem-table { width: 100%; min-width: 360px; border-collapse: collapse; line-height: 1.65; }
-.message-text .faheem-table th, .message-text .faheem-table td { padding: 8px 12px; text-align: right; vertical-align: top; }
+.message-text .faheem-table th, .message-text .faheem-table td { padding: 8px 12px; text-align: right; vertical-align: top; border: #99a8a8 solid 0.3px; }
 .message-text .faheem-table th { background: #22231e; color: #f0efe9; font-weight: 700; }
 .message-text strong { color: #f0efdf; font-weight: 700; }
 .message-text ul, .message-text ol { margin-block: .7em; }
