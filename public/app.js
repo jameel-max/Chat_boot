@@ -83,6 +83,91 @@ const authSubmit = document.querySelector("#auth-submit");
 const authModeToggle = document.querySelector("#auth-mode-toggle");
 const rememberDevice = document.querySelector("#remember-device");
 
+/* ============================================================
+ * دعم الرياضيات (LaTeX) عبر KaTeX
+ * - يُحقن KaTeX (CSS + JS) من CDN تلقائيًا عند الحاجة.
+ * - المعادلات السطرية: \( ... \)  أو $...$
+ * - المعادلات المنفصلة: \[ ... \]  أو $$...$$ (سطر واحد أو عدة أسطر)
+ * - تُحمى المعادلات من معالجة المارك داون حتى لا تتشوّه.
+ * ============================================================ */
+const KATEX_VERSION = "0.16.11";
+
+(function injectMathStyles() {
+  const style = document.createElement("style");
+  style.textContent = [
+    ".math-inline { white-space: normal; direction: ltr; unicode-bidi: isolate; }",
+    ".math-block { display: block; text-align: center; direction: ltr; unicode-bidi: isolate;",
+    "  margin: 0.75em 0; padding: 2px 4px; overflow-x: auto; overflow-y: hidden;",
+    "  max-width: 100%; }",
+    ".math-block > .katex-display { margin: 0; }",
+    ".math-pending { font-family: var(--font-mono, ui-monospace, monospace);",
+    "  white-space: pre-wrap; direction: ltr; unicode-bidi: isolate; }",
+  ].join(" ");
+  document.head.append(style);
+})();
+
+function loadKaTeX() {
+  if (window.katex) return Promise.resolve();
+  return new Promise((resolve) => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = `https://cdn.jsdelivr.net/npm/katex@${KATEX_VERSION}/dist/katex.min.css`;
+    document.head.append(link);
+
+    const script = document.createElement("script");
+    script.src = `https://cdn.jsdelivr.net/npm/katex@${KATEX_VERSION}/dist/katex.min.js`;
+    script.onload = () => {
+      document.querySelectorAll(".math-pending").forEach(renderPendingMath);
+      resolve();
+    };
+    script.onerror = () => resolve();
+    document.head.append(script);
+  });
+}
+loadKaTeX();
+
+function renderMath(parent, latex, displayMode) {
+  const container = document.createElement(displayMode ? "div" : "span");
+  container.className = displayMode ? "math-block" : "math-inline";
+  if (window.katex) {
+    try {
+      container.innerHTML = window.katex.renderToString(latex, {
+        displayMode,
+        throwOnError: false,
+        output: "html",
+        strict: false,
+      });
+    } catch {
+      container.textContent = latex;
+    }
+  } else {
+    container.classList.add("math-pending");
+    container.dataset.latex = latex;
+    container.dataset.display = String(displayMode);
+    container.textContent = latex;
+  }
+  parent.append(container);
+}
+
+function renderPendingMath(element) {
+  const latex = element.dataset.latex;
+  const displayMode = element.dataset.display === "true";
+  if (!window.katex || typeof latex !== "string") return;
+  try {
+    element.innerHTML = window.katex.renderToString(latex, {
+      displayMode,
+      throwOnError: false,
+      output: "html",
+      strict: false,
+    });
+    element.classList.remove("math-pending");
+    delete element.dataset.latex;
+    delete element.dataset.display;
+  } catch {
+    element.textContent = latex;
+  }
+}
+
 function setMobileMenuOpen(isOpen) {
   sidebar.classList.toggle("mobile-open", isOpen);
   sidebarBackdrop.classList.toggle("visible", isOpen);
@@ -303,6 +388,8 @@ function renderMarkdown(element, text) {
   let codeLanguage = "";
   let fenceCharacter = "";
   let fenceLength = 0;
+  let mathLines = null;
+  let mathClose = "";
 
   function flushParagraph() {
     if (!paragraph.length) return;
@@ -346,9 +433,32 @@ function renderMarkdown(element, text) {
     fenceLength = 0;
   }
 
+  function flushMath() {
+    if (mathLines === null) return;
+    renderMath(element, mathLines.join("\n"), true);
+    mathLines = null;
+    mathClose = "";
+  }
+
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex];
     const trimmed = line.trim();
+
+    // داخل كتلة رياضيات متعددة الأسطر: نجمع حتى نصل للإغلاق ($$ أو \])
+    if (mathLines !== null) {
+      const closeIndex = line.indexOf(mathClose);
+      if (closeIndex === -1) {
+        mathLines.push(line);
+      } else {
+        const before = line.slice(0, closeIndex);
+        if (before.trim()) mathLines.push(before);
+        const after = line.slice(closeIndex + mathClose.length).trim();
+        flushMath();
+        if (after) paragraph.push(after);
+      }
+      continue;
+    }
+
     if (codeLines !== null) {
       const closingFence = new RegExp(
         `^ {0,3}${fenceCharacter}{${fenceLength},}\\s*$`,
@@ -366,6 +476,28 @@ function renderMarkdown(element, text) {
       fenceCharacter = fence[1][0];
       fenceLength = fence[1].length;
       codeLanguage = fence[2].trim().split(/\s+/)[0] || "";
+      continue;
+    }
+
+    // كتلة رياضيات: تبدأ بـ $$ أو \[ في بداية السطر
+    const mathFence = line.match(/^ {0,3}(\$\$|\\\[)(.*)$/);
+    if (mathFence) {
+      const closer = mathFence[1] === "$$" ? "$$" : "\\]";
+      const rest = mathFence[2];
+      const closeIndex = rest.indexOf(closer);
+      flushParagraph();
+      flushList();
+      if (closeIndex !== -1) {
+        // معادلة كاملة على سطر واحد
+        renderMath(element, rest.slice(0, closeIndex).trim(), true);
+        const tail = rest.slice(closeIndex + closer.length).trim();
+        if (tail) paragraph.push(tail);
+        continue;
+      }
+      // كتلة متعددة الأسطر
+      mathLines = [];
+      mathClose = closer;
+      if (rest.trim()) mathLines.push(rest.trim());
       continue;
     }
 
@@ -471,10 +603,12 @@ function renderMarkdown(element, text) {
   flushParagraph();
   flushList();
   flushCode();
+  flushMath();
 }
 
 function appendInlineMarkdown(parent, text) {
-  const pattern = /(\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>]+|\*\*[^*]+\*\*|__[^_]+__|==.+?==|~~.+?~~|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)/g;
+  // الرياضيات أولاً حتى لا تُعالَج كمارك داون (تتجنّب تشوّه * و_ و~ داخل LaTeX)
+  const pattern = /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|\$(?!\s)(?:\\.|[^$\\\n])+?(?<!\s)\$(?!\d)|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>]+|\*\*[^*]+\*\*|__[^_]+__|==.+?==|~~.+?~~|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)/g;
   let position = 0;
 
   for (const match of text.matchAll(pattern)) {
@@ -484,6 +618,26 @@ function appendInlineMarkdown(parent, text) {
     }
 
     const token = match[0];
+
+    // معادلة منفصلة داخل النص: \[...\] أو $$...$$
+    if (token.startsWith("\\[") || token.startsWith("$$")) {
+      renderMath(parent, token.slice(2, -2).trim(), true);
+      position = index + token.length;
+      continue;
+    }
+    // معادلة سطرية: \(...\)
+    if (token.startsWith("\\(")) {
+      renderMath(parent, token.slice(2, -2).trim(), false);
+      position = index + token.length;
+      continue;
+    }
+    // معادلة سطرية: $...$
+    if (token.startsWith("$")) {
+      renderMath(parent, token.slice(1, -1).trim(), false);
+      position = index + token.length;
+      continue;
+    }
+
     const markdownLink = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
     if (markdownLink) {
       appendSafeLink(parent, markdownLink[1], markdownLink[2]);
@@ -512,7 +666,11 @@ function appendInlineMarkdown(parent, text) {
             ? "code"
             : "em";
     const formatted = document.createElement(tagName);
-    formatted.textContent = content;
+    if (tagName !== "code" && /\\[(\[]|\$/.test(content)) {
+      appendInlineMarkdown(formatted, content);
+    } else {
+      formatted.textContent = content;
+    }
     parent.append(formatted);
     position = index + token.length;
   }
