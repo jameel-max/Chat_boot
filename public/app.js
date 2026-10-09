@@ -126,17 +126,30 @@ function loadKaTeX() {
 }
 loadKaTeX();
 
+const katexHtmlCache = new Map();
+
+function katexHtml(latex, displayMode) {
+  const key = `${displayMode ? "D" : "I"}:${latex}`;
+  let html = katexHtmlCache.get(key);
+  if (html === undefined) {
+    html = window.katex.renderToString(latex, {
+      displayMode,
+      throwOnError: false,
+      output: "html",
+      strict: false,
+    });
+    if (katexHtmlCache.size > 400) katexHtmlCache.clear();
+    katexHtmlCache.set(key, html);
+  }
+  return html;
+}
+
 function renderMath(parent, latex, displayMode) {
   const container = document.createElement(displayMode ? "div" : "span");
   container.className = displayMode ? "math-block" : "math-inline";
   if (window.katex) {
     try {
-      container.innerHTML = window.katex.renderToString(latex, {
-        displayMode,
-        throwOnError: false,
-        output: "html",
-        strict: false,
-      });
+      container.innerHTML = katexHtml(latex, displayMode);
     } catch {
       container.textContent = latex;
     }
@@ -154,12 +167,7 @@ function renderPendingMath(element) {
   const displayMode = element.dataset.display === "true";
   if (!window.katex || typeof latex !== "string") return;
   try {
-    element.innerHTML = window.katex.renderToString(latex, {
-      displayMode,
-      throwOnError: false,
-      output: "html",
-      strict: false,
-    });
+    element.innerHTML = katexHtml(latex, displayMode);
     element.classList.remove("math-pending");
     delete element.dataset.latex;
     delete element.dataset.display;
@@ -787,6 +795,59 @@ async function readGeminiStream(response, assistantBody, name, answer) {
   let conversationTitle = null;
   let answerVisible = false;
   let streamComplete = false;
+  let shownLength = 0;
+  let frameId = 0;
+
+  // نرسم إطارًا واحدًا كحد أقصى لكل رسم شاشة، ونكشف جزءًا من النص المستلَم
+  // (كلما زاد المتراكم زادت السرعة) فيبدو البث متصلًا حتى لو وصل على دفعات كبيرة.
+  function paintAnswer() {
+    frameId = 0;
+    const backlog = answerText.length - shownLength;
+    if (backlog <= 0) return;
+    let step = Math.max(2, Math.ceil(backlog / (streamComplete ? 3 : 6)));
+    shownLength = Math.min(answerText.length, shownLength + step);
+    const lastCode = answerText.charCodeAt(shownLength - 1);
+    if (lastCode >= 0xd800 && lastCode <= 0xdbff && shownLength < answerText.length) {
+      shownLength += 1;
+    }
+    const nearBottom =
+      conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 160;
+    renderMarkdown(answer, answerText.slice(0, shownLength));
+    if (nearBottom) scrollToLatest();
+    if (shownLength < answerText.length) frameId = requestAnimationFrame(paintAnswer);
+  }
+
+  function schedulePaint() {
+    if (!frameId) frameId = requestAnimationFrame(paintAnswer);
+  }
+
+  function flushPaint() {
+    if (frameId) {
+      cancelAnimationFrame(frameId);
+      frameId = 0;
+    }
+    if (!answerVisible) return;
+    const nearBottom =
+      conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 160;
+    shownLength = answerText.length;
+    renderMarkdown(answer, answerText);
+    if (nearBottom) scrollToLatest();
+  }
+
+  function finishPainting() {
+    return new Promise((resolve) => {
+      const deadline = performance.now() + 700;
+      const check = () => {
+        if (shownLength >= answerText.length || performance.now() > deadline) {
+          flushPaint();
+          resolve();
+          return;
+        }
+        setTimeout(check, 30);
+      };
+      check();
+    });
+  }
 
   function dispatchEvent() {
     if (!dataLines.length) return;
@@ -807,8 +868,7 @@ async function readGeminiStream(response, assistantBody, name, answer) {
         answerVisible = true;
       }
       answerText += eventData.text;
-      renderMarkdown(answer, answerText);
-      scrollToLatest();
+      schedulePaint();
     } else if (eventName === "conversation") {
       if (
         typeof eventData.conversationId !== "string" ||
@@ -878,6 +938,7 @@ async function readGeminiStream(response, assistantBody, name, answer) {
     processLine("");
   } finally {
     if (!streamComplete) {
+      flushPaint();
       try {
         await reader.cancel();
       } catch {
@@ -889,8 +950,7 @@ async function readGeminiStream(response, assistantBody, name, answer) {
   if (!streamComplete || !answerText) {
     throw new Error("انتهى البث قبل اكتمال إجابة فهيم.");
   }
-  renderMarkdown(answer, answerText);
-  scrollToLatest();
+  await finishPainting();
   return {
     answer: answerText,
     responseId,
