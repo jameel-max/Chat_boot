@@ -1,5 +1,8 @@
 import base64
 import binascii
+import gzip
+import http.client
+import io
 import json
 import math
 import os
@@ -15,7 +18,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from http.cookies import CookieError, SimpleCookie
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 
 from database import Database
@@ -100,6 +103,8 @@ SYSTEM_INSTRUCTION = (
 
     "هدفك: إجابة دقيقة، مباشرة، طبيعية، ومناسبة لسؤال الطالب دون حشو."
     "كن على مزاج الطالب ان كان جدي او محايد او مرح واستخدم ايموجي لكي تعبر عن مشاعرك في اوفات الحزن او الفرح او اذا الطالب استخدم الايموجي"
+    "اجعل الاجوبة قصيرة لكن موفية في ايصال المعلومة للطالب "
+    "قم بترتيب الجواب لتسهيل قراءته على الطالب"
 )
 
 GRADE_NAMES = {
@@ -526,9 +531,47 @@ def load_local_env():
             os.environ[name] = value
 
 
+STATIC_GZIP_TYPES = {".html", ".js", ".css", ".svg", ".json", ".txt"}
+STATIC_GZIP_CACHE = {}
+STATIC_GZIP_LOCK = threading.Lock()
+GEMINI_THINKING_LEVELS = {"minimal", "low", "medium", "high"}
+
+
+class GeminiStream:
+    """غلاف خفيف حول استجابة Gemini يوفّر readline() ويغلق الاتصال عند الانتهاء."""
+
+    def __init__(self, connection, response):
+        self._connection = connection
+        self._response = response
+
+    def readline(self):
+        return self._response.readline()
+
+    def close(self):
+        try:
+            self._response.close()
+        finally:
+            self._connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+        return False
+
+
 class ChatHandler(SimpleHTTPRequestHandler):
+    # تعطيل خوارزمية Nagle: كل جزء من البث يُرسل فورًا بدل أن ينتظر ACK (يزيل تقطّع الكتابة).
+    disable_nagle_algorithm = True
+    thinking_rejected = False
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
+
+    def send_response(self, code, message=None):
+        self._last_status = code
+        super().send_response(code, message)
 
     def end_headers(self):
         visitor_token = getattr(self, "new_visitor_token", None)
@@ -550,6 +593,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 cookie += "; Secure"
             self.send_header("Set-Cookie", cookie)
             self.new_visitor_token = None
+        cache_control = getattr(self, "_static_cache_control", None)
+        if cache_control and getattr(self, "_last_status", None) in (200, 304):
+            self.send_header("Cache-Control", cache_control)
+            self._static_cache_control = None
         super().end_headers()
 
     def page_visitor_token(self):
@@ -668,7 +715,73 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        self._static_cache_control = self.static_cache_control()
+        if self.serve_static_file():
+            return
         super().do_GET()
+
+    def static_cache_control(self):
+        parts = urlsplit(self.path)
+        if parts.path.startswith("/api/"):
+            return None
+        # الروابط المرقّمة (?v=..) تُخزَّن يومًا كاملًا، وغيرها (index.html) تُراجَع بخفّة عبر ETag.
+        if "v" in parse_qs(parts.query):
+            return "public, max-age=86400"
+        return "no-cache"
+
+    def serve_static_file(self):
+        if "gzip" not in self.headers.get("Accept-Encoding", "").lower():
+            return False
+        url_path = urlsplit(self.path).path
+        if url_path.startswith("/api/"):
+            return False
+        try:
+            file_path = Path(self.translate_path(self.path))
+            if file_path.is_dir():
+                if not url_path.endswith("/"):
+                    return False
+                file_path = file_path / "index.html"
+            if file_path.suffix.lower() not in STATIC_GZIP_TYPES:
+                return False
+            stat = file_path.stat()
+        except OSError:
+            return False
+        signature = (stat.st_mtime_ns, stat.st_size)
+        key = str(file_path)
+        with STATIC_GZIP_LOCK:
+            cached = STATIC_GZIP_CACHE.get(key)
+        if cached is None or cached[0] != signature:
+            try:
+                data = file_path.read_bytes()
+            except OSError:
+                return False
+            etag = f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+            cached = (signature, gzip.compress(data, compresslevel=6, mtime=0), etag)
+            with STATIC_GZIP_LOCK:
+                STATIC_GZIP_CACHE[key] = cached
+        _, compressed, etag = cached
+        try:
+            if self.headers.get("If-None-Match", "").strip() == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Vary", "Accept-Encoding")
+                self.end_headers()
+                return True
+            content_type = self.guess_type(str(file_path))
+            if content_type.startswith("text/"):
+                content_type += "; charset=utf-8"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+            self.send_header("ETag", etag)
+            self.send_header("Content-Length", str(len(compressed)))
+            self.send_header("Last-Modified", self.date_time_string(stat.st_mtime))
+            self.end_headers()
+            self.wfile.write(compressed)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        return True
 
     def do_POST(self):
         if self.path != "/api/chat":
@@ -679,6 +792,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
         try:
             self._do_POST()
         finally:
+            self.close_gemini_prewarm()
             total = time.perf_counter() - self._chat_perf_started
             stages = (
                 "student_preferences",
@@ -847,6 +961,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
         generate_image = (
             payload.get("generateImage") is True or wants_image_generation(message)
         )
+        if not generate_image and os.environ.get("GEMINI_API_KEY", "").strip():
+            # نفتح اتصال TLS مع Gemini الآن بالتوازي مع قاعدة البيانات بدل انتظارها.
+            self.start_gemini_prewarm()
         student_started = time.perf_counter()
         student_preferences = get_database().get_student_preferences(user["id"])
         if not student_preferences:
@@ -1008,25 +1125,27 @@ class ChatHandler(SimpleHTTPRequestHandler):
             "system_instruction": system_instruction,
             "stream": True,
         }
+        # التفكير الديناميتي الافتراضي يؤخّر أول كلمة عدة ثوانٍ؛ "low" أسرع بكثير للأسئلة المدرسية.
+        # للتعديل: GEMINI_THINKING_LEVEL=minimal|low|medium|high (أو فارغة لتعطيله).
+        thinking_level = os.environ.get("GEMINI_THINKING_LEVEL", "low").strip().lower()
+        if thinking_level in GEMINI_THINKING_LEVELS and not ChatHandler.thinking_rejected:
+            request_payload["generation_config"] = {"thinking_level": thinking_level}
         request_data = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
         if len(request_data) > MAX_GEMINI_REQUEST_BYTES:
             self.send_json({"error": "تجاوز حجم السياق حد طلب Gemini."}, 413)
             return
-        request = Request(
-            API_URL,
-            data=request_data,
-            headers={
-                "x-goog-api-key": api_key,
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream",
-            },
-            method="POST",
-        )
+        request_headers = {
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
         gemini_started = time.perf_counter()
         stored["gemini_started_at"] = gemini_started
         stream_started = False
         try:
-            with urlopen(request, timeout=90) as response:
+            with self.open_gemini_stream(
+                request_data, request_headers, request_payload
+            ) as response:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache, no-transform")
@@ -1704,6 +1823,95 @@ class ChatHandler(SimpleHTTPRequestHandler):
         conversation["title"] = title
         conversation["title_needs_ai"] = False
         return title
+
+    def gemini_connection_class(self):
+        scheme = urlsplit(API_URL).scheme
+        return (
+            http.client.HTTPSConnection
+            if scheme == "https"
+            else http.client.HTTPConnection
+        )
+
+    def start_gemini_prewarm(self):
+        netloc = urlsplit(API_URL).netloc
+        connection = self.gemini_connection_class()(netloc, timeout=90)
+
+        def connect():
+            try:
+                connection.connect()
+            except Exception:
+                # عند الفشل يعيد http.client الاتصال تلقائيًا عند إرسال الطلب.
+                pass
+
+        thread = threading.Thread(target=connect, daemon=True)
+        thread.start()
+        self._gemini_prewarm = (connection, thread)
+
+    def close_gemini_prewarm(self):
+        prewarm = getattr(self, "_gemini_prewarm", None)
+        self._gemini_prewarm = None
+        if prewarm:
+            connection, thread = prewarm
+            thread.join(timeout=1)
+            connection.close()
+
+    def take_gemini_connection(self):
+        prewarm = getattr(self, "_gemini_prewarm", None)
+        self._gemini_prewarm = None
+        if prewarm:
+            connection, thread = prewarm
+            thread.join(timeout=10)
+            if not thread.is_alive():
+                return connection
+            connection.close()
+        return self.gemini_connection_class()(urlsplit(API_URL).netloc, timeout=90)
+
+    def open_gemini_stream(self, request_data, request_headers, request_payload=None):
+        parts = urlsplit(API_URL)
+        path = parts.path + (f"?{parts.query}" if parts.query else "")
+        for attempt in (0, 1):
+            connection = self.take_gemini_connection()
+            try:
+                connection.request(
+                    "POST", path, body=request_data, headers=request_headers
+                )
+                response = connection.getresponse()
+            except TimeoutError:
+                connection.close()
+                raise
+            except (http.client.HTTPException, OSError) as error:
+                connection.close()
+                raise URLError(error) from error
+            if response.status < 400:
+                if attempt == 1:
+                    ChatHandler.thinking_rejected = True
+                return GeminiStream(connection, response)
+            error_body = response.read()
+            connection.close()
+            if (
+                attempt == 0
+                and response.status == 400
+                and request_payload
+                and "generation_config" in request_payload
+            ):
+                # النموذج رفض إعداد التفكير: نعيد المحاولة مرة واحدة بدونه.
+                print("[PERF] رفض Gemini thinking_level؛ إعادة المحاولة بدونه", flush=True)
+                request_payload = {
+                    key: value
+                    for key, value in request_payload.items()
+                    if key != "generation_config"
+                }
+                request_data = json.dumps(
+                    request_payload, ensure_ascii=False
+                ).encode("utf-8")
+                continue
+            raise HTTPError(
+                API_URL,
+                response.status,
+                response.reason,
+                response.msg,
+                io.BytesIO(error_body),
+            )
 
     def stream_gemini_response(self, response, conversation):
         event_name = ""
