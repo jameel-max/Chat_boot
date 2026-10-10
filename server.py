@@ -12,6 +12,7 @@ import smtplib
 import ssl
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import parseaddr
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -35,6 +36,13 @@ VISIT_DEDUP_SECONDS = 30
 MAX_GEMINI_REQUEST_BYTES = 19 * 1024 * 1024
 MAX_GEMINI_CONTEXT_TOKENS = 900_000
 MAX_HISTORY_MESSAGES = 16  # عدد آخر الرسائل (سؤال وجواب) المرسلة كسياق إلى Gemini
+
+# ===== حصة المرفقات اليومية (صور وملفات) =====
+DAILY_UPLOAD_LIMIT = 4        # عدد الصور/الملفات المسموح بها لكل طالب يوميًا
+UPLOAD_QUOTA_PATH = Path(__file__).resolve().parent / "data" / "upload_quota.json"
+JORDAN_TZ = timezone(timedelta(hours=3))  # توقيت الأردن (UTC+3) لتصفير العداد عند منتصف الليل
+USER_PREFERENCES_PATH = Path(__file__).resolve().parent / "data" / "user_preferences.json"
+ALLOWED_THEMES = {"light", "dark"}
 MAX_CONTEXT_IMAGES = 32
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
@@ -57,14 +65,10 @@ database = None
 _database_lock = threading.Lock()
 
 SYSTEM_INSTRUCTION = (
-"لا تعرّف بنفسك إلا إذا سألك الطالب عن هويتك، ورحّب بالطالب باسمه في اول المحادثة فقط"
-"أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
-"إذا سُئلت عن مطوّرك، قل: «صنعني المطور جميل إسماعيل أبو حماد». لا تغيّرهما. "
-"اترك مسافة فارغة بين كل فقرة والأخرى لتسهيل القراءة على الطالب. "
-"أنشئ جدولًا أو أكثر إذا كان ذلك لازمًا. "
-"إذا طلب منك الطالب إنشاء صور، فأخبره أنك مساعد نصي ولا تستطيع إنشاء الصور، ووضّح ذلك باختصار."
+    "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
+    "وإذا سُئلت عن مطورك قل: «صنعني المطور جميل إسماعيل أبو حماد». لا تغيّرهما. "
+    "أنت مساعد نصي لا ينشئ الصور؛ وضّح ذلك باختصار وساعد بكتابة وصف للصورة أو بتحليل صورة يرسلها الطالب."
 )
-
 
 GRADE_NAMES = {
     "الأول": "الأول",
@@ -497,6 +501,112 @@ STATIC_GZIP_LOCK = threading.Lock()
 GEMINI_THINKING_LEVELS = {"minimal", "low", "medium", "high"}
 
 
+class UploadQuota:
+    """يحفظ عدد مرفقات كل طالب لليوم الحالي في ملف JSON."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.lock = threading.Lock()
+        self.data = {}
+        self._load()
+
+    @staticmethod
+    def _today():
+        return datetime.now(JORDAN_TZ).strftime("%Y-%m-%d")
+
+    def _load(self):
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = {}
+        day = self._today()
+        self.data = {
+            key: value
+            for key, value in (raw.items() if isinstance(raw, dict) else [])
+            if isinstance(value, dict) and value.get("day") == day
+        }
+
+    def _save(self):
+        day = self._today()
+        self.data = {k: v for k, v in self.data.items() if v.get("day") == day}
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(self.data), encoding="utf-8")
+            temporary.replace(self.path)
+        except OSError as error:
+            print(f"[QUOTA] تعذّر حفظ الحصة: {error}", flush=True)
+
+    def _entry(self, user_id):
+        key = str(user_id)
+        day = self._today()
+        entry = self.data.get(key)
+        if not entry or entry.get("day") != day:
+            entry = {"day": day, "used": 0}
+            self.data[key] = entry
+        return entry
+
+    @staticmethod
+    def _status(entry):
+        return {
+            "limit": DAILY_UPLOAD_LIMIT,
+            "used": entry["used"],
+            "remaining": max(0, DAILY_UPLOAD_LIMIT - entry["used"]),
+        }
+
+    def status(self, user_id):
+        with self.lock:
+            return self._status(self._entry(user_id))
+
+    def consume(self, user_id):
+        with self.lock:
+            entry = self._entry(user_id)
+            if entry["used"] >= DAILY_UPLOAD_LIMIT:
+                return False, self._status(entry)
+            entry["used"] += 1
+            self._save()
+            return True, self._status(entry)
+
+
+class UserPreferences:
+    """تفضيلات كل مستخدم (المظهر) تُحفظ في ملف JSON."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.lock = threading.Lock()
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = {}
+        self.data = raw if isinstance(raw, dict) else {}
+
+    def get(self, user_id):
+        with self.lock:
+            entry = self.data.get(str(user_id))
+            theme = entry.get("theme") if isinstance(entry, dict) else None
+            return {"theme": theme if theme in ALLOWED_THEMES else None}
+
+    def set_theme(self, user_id, theme):
+        with self.lock:
+            entry = self.data.get(str(user_id))
+            if not isinstance(entry, dict):
+                entry = {}
+            entry["theme"] = theme
+            self.data[str(user_id)] = entry
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = self.path.with_suffix(".tmp")
+                temporary.write_text(json.dumps(self.data), encoding="utf-8")
+                temporary.replace(self.path)
+            except OSError as error:
+                print(f"[PREFS] تعذّر حفظ التفضيلات: {error}", flush=True)
+            return {"theme": theme}
+
+
+UPLOAD_QUOTA = UploadQuota(UPLOAD_QUOTA_PATH)
+USER_PREFERENCES = UserPreferences(USER_PREFERENCES_PATH)
+
+
 class GeminiStream:
     """غلاف خفيف حول استجابة Gemini يوفّر readline() ويغلق الاتصال عند الانتهاء."""
 
@@ -595,6 +705,20 @@ class ChatHandler(SimpleHTTPRequestHandler):
                         "isPrimaryAdmin": self.is_primary_admin(user),
                     }
                 )
+            return
+
+        if self.path == "/api/preferences":
+            if not user:
+                self.send_unauthorized()
+            else:
+                self.send_json({"preferences": USER_PREFERENCES.get(user["id"])})
+            return
+
+        if self.path == "/api/uploads/quota":
+            if not user:
+                self.send_unauthorized()
+            else:
+                self.send_json({"quota": self.quota_for(user)})
             return
 
         if self.path == "/api/admin/dashboard":
@@ -807,6 +931,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if admin_role_match:
             self.admin_set_user_role(admin_role_match.group(1))
             return
+        if self.path == "/api/preferences":
+            self.save_preferences()
+            return
         if self.path == "/api/logout":
             token = self.session_token()
             get_database().delete_session(token)
@@ -918,6 +1045,18 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if not current_parts:
             self.send_json({"error": "اكتب رسالة أو أرفق صورة أو ملفًا قبل الإرسال."}, 400)
             return
+        if (image is not None or attachment is not None) and not self.is_admin(user):
+            allowed, quota_status = UPLOAD_QUOTA.consume(user["id"])
+            if not allowed:
+                self.send_json(
+                    {
+                        "error": "انتهت مرفقاتك لهذا اليوم. شاهد إعلانًا قصيرًا لتحصل على المزيد.",
+                        "code": "upload_limit",
+                        "quota": quota_status,
+                    },
+                    429,
+                )
+                return
         generate_image = (
             payload.get("generateImage") is True or wants_image_generation(message)
         )
@@ -1219,6 +1358,31 @@ class ChatHandler(SimpleHTTPRequestHandler):
         self.send_json({"ok": True, "title": updated_title})
 
     def do_DELETE(self):
+        if self.path == "/api/admin/support-messages":
+            user = self.current_user()
+            if not user:
+                self.send_unauthorized()
+                return
+            if not self.is_admin(user):
+                self.send_json(
+                    {"error": "ليس لديك صلاحية لحذف رسائل مركز المساعدة."}, 403
+                )
+                return
+            delete_all = getattr(get_database(), "delete_all_support_messages", None)
+            if delete_all is None:
+                self.send_json(
+                    {"error": "أضف الدالة delete_all_support_messages إلى database.py أولًا."},
+                    501,
+                )
+                return
+            try:
+                deleted = delete_all()
+            except Database.error_types:
+                self.send_json({"error": "تعذّر حذف رسائل مركز المساعدة."}, 500)
+                return
+            self.send_json({"ok": True, "deleted": deleted if isinstance(deleted, int) else None})
+            return
+
         admin_match = re.fullmatch(r"/api/admin/users/([a-f0-9]{32})", self.path)
         if admin_match:
             user = self.current_user()
@@ -1686,6 +1850,25 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if os.environ.get("COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes"}:
             cookie += "; Secure"
         return cookie
+
+    def quota_for(self, user):
+        if self.is_admin(user):
+            return {"unlimited": True}
+        return UPLOAD_QUOTA.status(user["id"])
+
+    def save_preferences(self):
+        user = self.current_user()
+        if not user:
+            self.send_unauthorized()
+            return
+        payload = self.read_json_body()
+        if payload is None:
+            return
+        theme = payload.get("theme")
+        if theme not in ALLOWED_THEMES:
+            self.send_json({"error": "المظهر غير صالح."}, 400)
+            return
+        self.send_json({"preferences": USER_PREFERENCES.set_theme(user["id"], theme)})
 
     def current_user(self):
         return get_database().get_session_user(self.session_token())
