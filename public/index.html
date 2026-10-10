@@ -6,18 +6,32 @@
     <meta name="theme-color" content="#101114">
     <title>فهيم — المساعد الذكي لمدرسة خريبة السوق الثانوية الثانية للبنين</title>
     <link rel="icon" type="image/svg+xml" href="school-logo.png">
+    <link rel="preload" as="image" href="/loader-robot.webp" type="image/webp">
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script>try{var t=localStorage.getItem("faheem_theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
+    <script>try{if(!localStorage.getItem("faheem_logged_in_before"))document.documentElement.classList.add("no-loader")}catch(e){document.documentElement.classList.add("no-loader")}</script>
     <link rel="stylesheet" href="/style.css?v=24">
-    <link rel="stylesheet" href="/extras.css?v=1">
-    <link rel="stylesheet" href="/theme.css?v=3">
+    <link rel="stylesheet" href="/extras.css?v=2">
+    <link rel="stylesheet" href="/theme.css?v=4">
     <script>try{if(localStorage.getItem("faheem_sidebar_collapsed")==="1")document.documentElement.classList.add("sidebar-collapsed")}catch(e){}</script>
-    <script src="/app.js?v=43" defer></script>
+    <script src="/app.js?v=44" defer></script>
   </head>
   <body>
+    <div class="app-loader" id="app-loader" role="status" aria-live="polite" aria-label="جارٍ التحميل">
+      <div class="loader-stage">
+        <div class="loader-glow"></div>
+        <picture>
+          <source srcset="/loader-robot.webp" type="image/webp">
+          <img class="loader-robot" src="/loader-robot.png" alt="" width="420" height="510" decoding="async" draggable="false">
+        </picture>
+        <div class="loader-shadow"></div>
+      </div>
+      <p class="loader-text">فهيم يجهّز مساحتك<span class="loader-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
+    </div>
+    <noscript><style>.app-loader{display:none}#auth-overlay[data-boot]{visibility:visible!important}</style></noscript>
     <main class="app-shell">
       <aside class="sidebar" id="sidebar" aria-label="القائمة الجانبية">
         <div class="sidebar-header">
@@ -49,12 +63,12 @@
         <nav class="history-list" id="history-list" aria-label="سجل المحادثات"></nav>
         <div class="sidebar-bottom">
           <img class="sidebar-avatar user-avatar hidden" id="user-avatar" alt="">
-          <button class="profile-settings-toggle" id="profile-settings-toggle" type="button" aria-label="إعدادات الحساب" aria-expanded="false" aria-controls="profile-settings-menu" title="إعدادات الحساب">
-            <img src="settings-svgrepo-com.svg" alt="">
-          </button>
           <div class="sidebar-avatar" id="user-avatar-fallback">ف</div>
           <div class="profile-copy"><strong id="profile-name">مساحتك الخاصة</strong></div>
           <div class="profile-settings hidden" id="profile-settings">
+            <button class="profile-settings-toggle" id="profile-settings-toggle" type="button" aria-label="إعدادات الحساب" aria-expanded="false" aria-controls="profile-settings-menu" title="إعدادات الحساب">
+              <img src="settings-svgrepo-com.svg" alt="">
+            </button>
             <div class="profile-settings-menu hidden" id="profile-settings-menu">
               <div class="theme-switch" role="group" aria-label="المظهر">
                 <button class="theme-option" type="button" data-theme-option="light" aria-pressed="true">☀️ فاتح</button>
@@ -129,7 +143,7 @@
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
       </section>
     </main>
-    <section class="auth-overlay" id="auth-overlay" aria-labelledby="auth-title">
+    <section class="auth-overlay" id="auth-overlay" data-boot aria-labelledby="auth-title">
       <div class="auth-card">
         <img class="welcome-logo" src="/school-logo.png" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
         <h1 id="auth-title">أهلًا بك في فهيم</h1>

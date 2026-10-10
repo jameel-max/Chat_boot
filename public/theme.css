@@ -31,3 +31,8 @@ html[data-theme="light"] :is(.brand-logo, .mini-logo, .welcome-logo, .user-avata
 html[data-theme="light"] [data-photo-bg] {
   filter: invert(1) hue-rotate(180deg);
 }
+
+/* شاشة التحميل تُرسم بألوانها المكتوبة في extras.css (نلغي قلب الصفحة عنها) */
+html[data-theme="light"] .app-loader {
+  filter: invert(1) hue-rotate(180deg);
+}

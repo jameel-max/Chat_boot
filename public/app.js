@@ -1123,6 +1123,11 @@ function setAuthenticated(user, isAdmin = false, isPrimaryAdmin = false) {
     userAvatarFallback.classList.remove("hidden");
   }
   authOverlay.classList.add("hidden");
+  try {
+    localStorage.setItem(LOGGED_IN_BEFORE_KEY, "1");
+  } catch {
+    // التخزين غير متاح
+  }
   afterAuthenticated();
 }
 
@@ -1477,6 +1482,38 @@ function setAuthMode(mode) {
   authError.textContent = "";
 }
 
+// ===== شاشة التحميل: تظهر أثناء التحقق من الجلسة بدل وميض نافذة تسجيل الدخول =====
+const appLoader = document.querySelector("#app-loader");
+const LOADER_MIN_MS = 700;
+const LOADER_MAX_MS = 12000;
+const LOGGED_IN_BEFORE_KEY = "faheem_logged_in_before";
+const loaderStartedAt = performance.now();
+
+function hideAppLoader() {
+  authOverlay.removeAttribute("data-boot");
+  if (!appLoader || appLoader.dataset.done) return;
+  appLoader.dataset.done = "1";
+  if (document.documentElement.classList.contains("no-loader")) {
+    appLoader.remove();
+    return;
+  }
+  const wait = Math.max(0, LOADER_MIN_MS - (performance.now() - loaderStartedAt));
+  window.setTimeout(() => {
+    appLoader.classList.add("is-hidden");
+    const remove = () => appLoader.remove();
+    appLoader.addEventListener("transitionend", remove, { once: true });
+    window.setTimeout(remove, 900);
+  }, wait);
+}
+
+// إن تعذّر الخادم طويلًا لا نترك الشاشة عالقة: نعرض تسجيل الدخول
+window.setTimeout(() => {
+  if (appLoader && !appLoader.dataset.done) {
+    showAuthOverlay("");
+    hideAppLoader();
+  }
+}, LOADER_MAX_MS);
+
 async function initializeApp() {
   try {
     const result = await apiRequest("/api/me", { suppressAuthOverlay: true });
@@ -1484,6 +1521,8 @@ async function initializeApp() {
     await loadHistory();
   } catch (error) {
     showAuthOverlay("");
+  } finally {
+    hideAppLoader();
   }
 }
 
