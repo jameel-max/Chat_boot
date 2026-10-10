@@ -20,8 +20,10 @@ html[data-theme="light"] .conversation {
   background: #000;
 }
 
-/* الصور الحقيقية والشعار لا تُقلب ألوانها */
-html[data-theme="light"] :is(.brand-logo, .mini-logo, .welcome-logo, .user-avatar, .sidebar-avatar, .message-avatar img, #preview-image, .message-image) {
+/* الصور الحقيقية والشعار لا تُقلب ألوانها.
+   تُستثنى الصور داخل [data-photo-bg]: ذلك العنصر كله أُعيد قلبه فصارت ألوانه أصلية،
+   وقلب الشعار مرة ثانية داخله يجعله سالبًا (أبيض). */
+html[data-theme="light"] :is(.brand-logo, .mini-logo, .welcome-logo, .user-avatar, .sidebar-avatar, .message-avatar img, #preview-image, .message-image):not([data-photo-bg] *) {
   filter: invert(1) hue-rotate(180deg);
 }
 
