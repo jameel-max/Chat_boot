@@ -24,3 +24,8 @@ html[data-theme="light"] .conversation {
 html[data-theme="light"] :is(.brand-logo, .mini-logo, .welcome-logo, .user-avatar, .sidebar-avatar, .message-avatar img, #preview-image, .message-image) {
   filter: invert(1) hue-rotate(180deg);
 }
+
+/* العنصر الذي يحمل صورة images.jpg (يعلّمه app.js) يبقى بمظهره الأصلي: الصورة بتظليلها الأسود */
+html[data-theme="light"] [data-photo-bg] {
+  filter: invert(1) hue-rotate(180deg);
+}

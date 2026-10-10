@@ -1633,6 +1633,24 @@ themeButtons.forEach((button) => {
 });
 applyTheme(document.documentElement.dataset.theme);
 
+// الصورة الخلفية (images.jpg) تحتفظ بمظهرها الأصلي وتظليلها الأسود في المظهرين:
+// نعلّم العنصر الذي يحملها (أو ::before / ::after) ليستثنيه theme.css من قلب الألوان.
+function markPhotoBackgrounds() {
+  for (const element of document.querySelectorAll("body *")) {
+    if (element.parentElement?.closest("[data-photo-bg]")) continue;
+    for (const pseudo of [null, "::before", "::after"]) {
+      const image = window.getComputedStyle(element, pseudo).backgroundImage;
+      if (image && image.includes("images.jpg")) {
+        element.dataset.photoBg = "true";
+        break;
+      }
+    }
+  }
+}
+
+markPhotoBackgrounds();
+window.addEventListener("load", markPhotoBackgrounds);
+
 function afterAuthenticated() {
   refreshUploadQuota();
   loadThemePreference();
