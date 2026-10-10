@@ -10,9 +10,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>try{var t=localStorage.getItem("faheem_theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
     <link rel="stylesheet" href="/style.css?v=24">
+    <link rel="stylesheet" href="/extras.css?v=1">
+    <link rel="stylesheet" href="/theme.css?v=1">
     <script>try{if(localStorage.getItem("faheem_sidebar_collapsed")==="1")document.documentElement.classList.add("sidebar-collapsed")}catch(e){}</script>
-    <script src="/app.js?v=40" defer></script>
+    <script src="/app.js?v=42" defer></script>
   </head>
   <body>
     <main class="app-shell">
@@ -53,6 +56,10 @@
               <img src="settings-svgrepo-com.svg" alt="">
             </button>
             <div class="profile-settings-menu hidden" id="profile-settings-menu">
+              <div class="theme-switch" role="group" aria-label="المظهر">
+                <button class="theme-option" type="button" data-theme-option="light" aria-pressed="true">☀️ فاتح</button>
+                <button class="theme-option" type="button" data-theme-option="dark" aria-pressed="false">🌙 داكن</button>
+              </div>
               <button class="profile-settings-action" id="change-password-button" type="button">تغيير كلمة المرور</button>
               <button class="profile-settings-action" id="logout-button" type="button">خروج</button>
             </div>
@@ -78,7 +85,7 @@
             <h1>مرحبا انا فهيم<br><span>مساعدك الدراسي</span></h1>
             <p>لطلاب خريبة السوق الثانوية الثانية للبنين.<br>اسألني عن دروسك أو أرسل صورة لمسألة، وسأشرح لك خطوة بخطوة.</p>
             <div class="suggestions" aria-label="أسئلة مقترحة">
-              <button type="button" class="suggestion" data-prompt="اشرحلي تحليل العبارة التربيعية بالتفصيل"><span>✦</span> ساعدني احلل العبارة التربيعية </button>
+              <button type="button" class="suggestion" data-prompt="ساعدني أراجع درس الرياضيات خطوة بخطوة"><span>✦</span> راجع معي درس الرياضيات</button>
               <button type="button" class="suggestion" data-prompt="اشرح لي مفهومًا علميًا بطريقة بسيطة مع مثال"><span>↗</span> اشرح لي مفهومًا علميًا</button>
               <button type="button" class="suggestion" data-prompt="اختبرني بأسئلة قصيرة في اللغة العربية"><span>✎</span> اختبرني في اللغة العربية</button>
               <button type="button" class="suggestion" data-prompt="ساعدني أضع خطة مذاكرة لهذا الأسبوع"><span>⌁</span> ساعدني في تنظيم دراستي</button>
@@ -114,6 +121,9 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-5 14-2.5-5.5L5 12Z"></path><path d="m11.5 13.5 3.5-3.5"></path></svg>
             </button>
           </form>
+          <div class="quota-row hidden" id="quota-row">
+            <span class="quota-text" id="quota-text"></span>
+          </div>
           <div class="composer-note">قد يخطئ فهيم أحيانًا. تحقّق من المعلومات المهمة.</div>
         </div>
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -233,6 +243,9 @@
         <p class="admin-note">يمكن إدارة صلاحيات الأدمن من قائمة المستخدمين. حساب الأدمن الأساسي محمي، وكلمات المرور لا تظهر في اللوحة.</p>
         </div>
         <div class="admin-support-view hidden" id="admin-support-view">
+          <div class="admin-support-toolbar">
+            <button class="admin-danger-button hidden" id="admin-support-delete-all" type="button">حذف كل الرسائل</button>
+          </div>
           <div class="admin-support-list" id="admin-support-messages"></div>
           <p class="admin-empty hidden" id="admin-support-empty">لا توجد رسائل أو شكاوى حتى الآن.</p>
         </div>

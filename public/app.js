@@ -59,6 +59,7 @@ const adminUsersView = document.querySelector("#admin-users-view");
 const adminSupportView = document.querySelector("#admin-support-view");
 const adminSupportMessages = document.querySelector("#admin-support-messages");
 const adminSupportEmpty = document.querySelector("#admin-support-empty");
+const adminSupportDeleteAll = document.querySelector("#admin-support-delete-all");
 const adminPasswordDialog = document.querySelector("#admin-password-dialog");
 const adminPasswordDescription = document.querySelector("#admin-password-description");
 const adminPasswordForm = document.querySelector("#admin-password-form");
@@ -280,10 +281,29 @@ async function loadAdminSupportMessages() {
     document.querySelector("#admin-support-tab").textContent =
       newCount ? `رسائل المساعدة (${newCount.toLocaleString("ar")})` : "رسائل المساعدة";
     adminSupportEmpty.classList.toggle("hidden", result.messages.length > 0);
+    adminSupportDeleteAll.classList.toggle("hidden", result.messages.length === 0);
+    adminSupportDeleteAll.dataset.count = String(result.messages.length);
   } catch (error) {
     adminError.textContent = error.message;
   }
 }
+
+adminSupportDeleteAll.addEventListener("click", async () => {
+  const count = Number(adminSupportDeleteAll.dataset.count || 0);
+  if (!window.confirm(`سيتم حذف جميع رسائل مركز المساعدة (${count.toLocaleString("ar")}) نهائيًا. هل أنت متأكد؟`)) {
+    return;
+  }
+  adminSupportDeleteAll.disabled = true;
+  adminError.textContent = "";
+  try {
+    await apiRequest("/api/admin/support-messages", { method: "DELETE" });
+    await loadAdminSupportMessages();
+  } catch (error) {
+    adminError.textContent = error.message;
+  } finally {
+    adminSupportDeleteAll.disabled = false;
+  }
+});
 
 function filterAdminList(list, search, emptyMessage, noResultsMessage) {
   const activeTab = adminTabs.find((tab) => tab.getAttribute("aria-selected") === "true")
@@ -1103,6 +1123,7 @@ function setAuthenticated(user, isAdmin = false, isPrimaryAdmin = false) {
     userAvatarFallback.classList.remove("hidden");
   }
   authOverlay.classList.add("hidden");
+  afterAuthenticated();
 }
 
 async function loadAdminDashboard() {
@@ -1284,6 +1305,7 @@ function renderHistory(conversations) {
   for (const record of conversations) {
     const entry = document.createElement("div");
     entry.className = "history-entry";
+    entry.dataset.id = record.id;
     if (record.id === currentConversationId) entry.classList.add("active");
 
     const title = document.createElement("button");
@@ -1345,7 +1367,7 @@ function filterHistory() {
 
 async function loadHistory() {
   const result = await apiRequest("/api/conversations");
-  renderHistory(result.conversations);
+  renderHistory(result.conversations.filter((item) => !pendingDeletes.has(item.id)));
 }
 
 async function loadConversation(id) {
@@ -1388,17 +1410,55 @@ async function renameConversation(record) {
   }
 }
 
-async function deleteConversation(record) {
-  if (!window.confirm(`هل تريد حذف محادثة «${record.title}» نهائيًا؟`)) return;
-  try {
-    await apiRequest(`/api/conversations/${encodeURIComponent(record.id)}`, {
-      method: "DELETE",
+// محادثات تُحذف في الخلفية: نخفيها من القائمة فورًا حتى لو أعاد الخادم نسخة قديمة منها
+const pendingDeletes = new Set();
+
+function sendConversationDelete(id, attempt = 0) {
+  fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    cache: "no-store",
+    keepalive: true, // يكتمل الطلب حتى لو أُغلقت الصفحة
+  })
+    .then((response) => {
+      if (response.ok || response.status === 404) {
+        pendingDeletes.delete(id);
+        return;
+      }
+      throw new Error(`HTTP ${response.status}`);
+    })
+    .catch(() => {
+      if (attempt < 2) {
+        window.setTimeout(() => sendConversationDelete(id, attempt + 1), 1500 * (attempt + 1));
+        return;
+      }
+      pendingDeletes.delete(id);
+      showToast("تعذّر إكمال حذف المحادثة، ستعود إلى القائمة.");
+      loadHistory().catch(() => {});
     });
-    if (currentConversationId === record.id) resetChat();
-    await loadHistory();
-  } catch (error) {
-    showToast(error.message);
+}
+
+function deleteConversation(record) {
+  if (!window.confirm(`هل تريد حذف محادثة «${record.title}» نهائيًا؟`)) return;
+  const isActive = currentConversationId === record.id;
+  if (isActive && sendButton.disabled) {
+    showToast("انتظر حتى ينتهي فهيم من الرد ثم احذف المحادثة.");
+    return;
   }
+
+  pendingDeletes.add(record.id);
+
+  // 1) إزالة فورية من قائمة المحادثات
+  for (const entry of historyList.querySelectorAll(".history-entry")) {
+    if (entry.dataset.id === record.id) entry.remove();
+  }
+  if (!historyList.querySelector(".history-entry")) renderHistory([]);
+
+  // 2) العودة فورًا إلى الواجهة الرئيسية (شعار المدرسة والاختصارات)
+  if (isActive) resetChat();
+
+  // 3) الحذف الفعلي من قاعدة البيانات في الخلفية دون انتظار
+  sendConversationDelete(record.id);
 }
 
 function setAuthMode(mode) {
@@ -1427,8 +1487,163 @@ async function initializeApp() {
   }
 }
 
+const ACTIVITY_CREATE_PATTERN =
+  /(اكتب|اكتبي|أنشئ|انشئ|ألّف|ألف|صمّم|صمم|ولّد|ولد|لخّص|لخص|تلخيص|مقال|موضوع تعبير|قصيدة|قصة|رسالة|برنامج|كود|خطة|جدول|اختبار|أسئلة)/;
+
+// يحدد حالة فهيم من طلب الطالب: تحليل مرفق، إنشاء محتوى، أو تفكير عادي
+function detectActivity(text, hasImage, hasFile) {
+  if (hasImage) {
+    return {
+      state: "analyzing",
+      labels: ["فهيم يحلّل الصورة", "يقرأ التفاصيل", "يربطها بسؤالك"],
+    };
+  }
+  if (hasFile) {
+    return {
+      state: "analyzing",
+      labels: ["فهيم يقرأ الملف", "يحلّل محتواه", "يستخرج المهم"],
+    };
+  }
+  if (ACTIVITY_CREATE_PATTERN.test(text)) {
+    return {
+      state: "creating",
+      labels: ["فهيم ينشئ المحتوى", "يصيغ النص", "يراجع الصياغة"],
+    };
+  }
+  return {
+    state: "thinking",
+    labels: ["فهيم يفكّر", "يرتّب أفكاره", "يجهّز الإجابة"],
+  };
+}
+
+function createActivityIndicator({ state, labels }) {
+  const indicator = document.createElement("div");
+  indicator.className = "typing";
+  indicator.dataset.state = state;
+  indicator.setAttribute("aria-label", labels[0]);
+
+  const icon = document.createElement("span");
+  icon.className = "typing-icon";
+  icon.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 3; index += 1) {
+    icon.append(document.createElement("b"));
+  }
+
+  const label = document.createElement("span");
+  label.className = "typing-label";
+  label.textContent = labels[0];
+
+  indicator.append(icon, label);
+  for (let index = 0; index < 3; index += 1) {
+    indicator.append(document.createElement("i"));
+  }
+
+  let step = 0;
+  const timer = window.setInterval(() => {
+    if (!indicator.isConnected) {
+      window.clearInterval(timer);
+      return;
+    }
+    step = (step + 1) % labels.length;
+    label.textContent = labels[step];
+    indicator.setAttribute("aria-label", labels[step]);
+  }, 2600);
+
+  return indicator;
+}
+
+// ===== حصة المرفقات اليومية =====
+const quotaRow = document.querySelector("#quota-row");
+const quotaText = document.querySelector("#quota-text");
+let uploadQuota = null;
+
+function renderUploadQuota() {
+  if (!quotaRow) return;
+  if (!uploadQuota || uploadQuota.unlimited) {
+    quotaRow.classList.add("hidden");
+    return;
+  }
+  const left = uploadQuota.remaining;
+  quotaRow.classList.remove("hidden");
+  quotaRow.classList.toggle("empty", left <= 0);
+  quotaRow.classList.toggle("low", left === 1);
+  const number = (value) => Number(value).toLocaleString("ar");
+  quotaText.textContent =
+    left > 0
+      ? `متبقي لك ${number(left)} من ${number(uploadQuota.limit)} مرفقات اليوم`
+      : "انتهت مرفقاتك لهذا اليوم، عُد غدًا";
+}
+
+async function refreshUploadQuota() {
+  try {
+    const result = await apiRequest("/api/uploads/quota", { suppressAuthOverlay: true });
+    uploadQuota = result.quota;
+    renderUploadQuota();
+  } catch {
+    // العدّاد غير ضروري لعمل الدردشة
+  }
+}
+
+function ensureUploadAllowed() {
+  if (!uploadQuota || uploadQuota.unlimited || uploadQuota.remaining > 0) return true;
+  showToast("انتهت مرفقاتك لهذا اليوم، عُد غدًا.");
+  return false;
+}
+
+// ===== المظهر (فاتح / داكن) =====
+const THEME_KEY = "faheem_theme";
+const DEFAULT_THEME = "light";
+const themeButtons = document.querySelectorAll("[data-theme-option]");
+
+function applyTheme(theme, { save = false } = {}) {
+  const value = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = value;
+  try {
+    localStorage.setItem(THEME_KEY, value);
+  } catch {
+    // التخزين غير متاح
+  }
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", value === "dark" ? "#101114" : "#ffffff");
+  themeButtons.forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.themeOption === value));
+  });
+  if (save) {
+    fetch("/api/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ theme: value }),
+    }).catch(() => {});
+  }
+}
+
+async function loadThemePreference() {
+  try {
+    const result = await apiRequest("/api/preferences", { suppressAuthOverlay: true });
+    applyTheme(result?.preferences?.theme || DEFAULT_THEME);
+  } catch {
+    // نبقى على المظهر الحالي
+  }
+}
+
+themeButtons.forEach((button) => {
+  button.addEventListener("click", () => applyTheme(button.dataset.themeOption, { save: true }));
+});
+applyTheme(document.documentElement.dataset.theme);
+
+function afterAuthenticated() {
+  refreshUploadQuota();
+  loadThemePreference();
+}
+
 async function sendMessage(message) {
   const text = message.trim();
+
+  if ((selectedImage || selectedFile) && !ensureUploadAllowed()) {
+    return;
+  }
 
   if ((!text && !selectedImage && !selectedFile) || sendButton.disabled) {
     return;
@@ -1486,19 +1701,9 @@ async function sendMessage(message) {
 
   const assistantBody = appendMessage("assistant", "");
 
-  const typing = document.createElement("div");
-  typing.className = "typing";
-  typing.setAttribute("aria-label", "فهيم يفكر");
-
-  const typingLabel = document.createElement("span");
-  typingLabel.className = "typing-label";
-  typingLabel.textContent = "فهيم يفكّر";
-
-  typing.append(typingLabel);
-
-  for (let index = 0; index < 3; index += 1) {
-    typing.append(document.createElement("i"));
-  }
+  const typing = createActivityIndicator(
+    detectActivity(text, Boolean(image), Boolean(file)),
+  );
 
   assistantBody.append(typing);
 
@@ -1547,6 +1752,10 @@ async function sendMessage(message) {
               result?.error ||
               result?.message ||
               errorMessage;
+            if (result?.code === "upload_limit" && result.quota) {
+              uploadQuota = result.quota;
+              renderUploadQuota();
+            }
           } catch {
             // إذا كان الرد نصًا وليس JSON
             errorMessage = rawText.trim().slice(0, 500);
@@ -1598,6 +1807,8 @@ async function sendMessage(message) {
     setBusy(false);
     input.focus();
   }
+
+  if (image || file) refreshUploadQuota();
 
   if (refreshHistory) {
     try {
@@ -1676,8 +1887,12 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-document.querySelector("#upload-button").addEventListener("click", () => imageInput.click());
-document.querySelector("#file-upload-button").addEventListener("click", () => fileInput.click());
+document.querySelector("#upload-button").addEventListener("click", () => {
+  if (ensureUploadAllowed()) imageInput.click();
+});
+document.querySelector("#file-upload-button").addEventListener("click", () => {
+  if (ensureUploadAllowed()) fileInput.click();
+});
 imageInput.addEventListener("change", () => {
   const file = imageInput.files?.[0];
   if (!file) return;

@@ -1,0 +1,26 @@
+/*
+ * المظهر الفاتح (الافتراضي) والداكن.
+ * الداكن = تصميم الموقع الحالي بلا تغيير. الفاتح = قلب ألوان الصفحة كاملة (حل مؤقت يعمل دون تعديل style.css).
+ * لبناء مظهر فاتح أصلي بألوان مضبوطة أرسل style.css وسأستبدل هذا الملف به.
+ */
+html { transition: filter .2s ease; }
+
+html[data-theme="dark"] { color-scheme: dark; }
+
+html[data-theme="light"] {
+  /* dark هنا ثم يُقلب الفلتر الألوان، فتظهر عناصر النماذج والتمرير بشكل فاتح */
+  color-scheme: dark;
+  background: #000; /* يصير أبيض نقيًا بعد القلب */
+  filter: invert(1) hue-rotate(180deg);
+}
+html[data-theme="light"] body,
+html[data-theme="light"] .app-shell,
+html[data-theme="light"] .chat-panel,
+html[data-theme="light"] .conversation {
+  background: #000;
+}
+
+/* الصور الحقيقية والشعار لا تُقلب ألوانها */
+html[data-theme="light"] :is(.brand-logo, .mini-logo, .welcome-logo, .user-avatar, .sidebar-avatar, .message-avatar img, #preview-image, .message-image) {
+  filter: invert(1) hue-rotate(180deg);
+}
