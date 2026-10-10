@@ -1154,6 +1154,14 @@ class Database:
             )
 
         return cursor.rowcount > 0
+    
+    def delete_all_support_messages(self):
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM support_messages"
+            )
+
+        return cursor.rowcount
 
     def is_admin(
         self,
