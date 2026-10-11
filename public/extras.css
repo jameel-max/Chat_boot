@@ -147,3 +147,78 @@ html:not(.no-loader) #auth-overlay[data-boot] { visibility: hidden; }
   0%, 80%, 100% { opacity: .25; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-3px); }
 }
+
+/* ===== أزرار النسخ (الكود + رد فهيم) ===== */
+.message-actions { display: flex; gap: 6px; margin-top: 8px; }
+.copy-button, .code-copy {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font: inherit; font-size: 12px; line-height: 1; color: inherit; background: transparent;
+  border: 1px solid rgba(127, 127, 127, .32); border-radius: 8px; padding: 6px 10px; opacity: .75;
+  user-select: none; -webkit-user-select: none;
+  transition: opacity .15s ease, background .15s ease, border-color .15s ease, color .15s ease;
+}
+.copy-button:hover, .copy-button:focus-visible, .code-copy:hover, .code-copy:focus-visible {
+  opacity: 1; background: rgba(127, 127, 127, .16);
+}
+.copy-button.copied, .code-copy.copied { opacity: 1; color: #3fb97a; border-color: #3fb97a; }
+.copy-icon { display: inline-flex; width: 15px; height: 15px; }
+.copy-icon svg { width: 100%; height: 100%; }
+.code-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.code-copy { padding: 4px 8px; font-size: 11px; border-radius: 6px; }
+.code-copy .copy-icon { width: 13px; height: 13px; }
+
+/* ===== شاشة فتح المحادثة (الروبوت) داخل منطقة الدردشة ===== */
+.convo-loader {
+  --cl-text: #c7d0e0;
+  --cl-glow: rgba(90, 200, 255, .22);
+  --cl-shadow: 0, 0, 0;
+  --cl-strength: .9;
+  --cl-floor: rgba(120, 170, 255, .14);
+  --cl-time: 2.2s;
+  --cl-ease: cubic-bezier(.45, 0, .55, 1);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  width: 100%; min-height: min(60vh, 420px); margin: auto 0; padding: 24px 0;
+  animation: convo-fade .25s ease both;
+}
+html[data-theme="light"] .convo-loader:not([data-photo-bg] *) {
+  filter: invert(1) hue-rotate(180deg);
+  --cl-text: #4a5568;
+  --cl-glow: rgba(60, 160, 230, .18);
+  --cl-strength: .5;
+  --cl-floor: rgba(0, 0, 0, 0);
+}
+.convo-loader__stage { position: relative; width: 112px; padding: 22px 0 20px; }
+.convo-loader__glow {
+  position: absolute; left: 50%; top: 46%; width: 170%; aspect-ratio: 1; pointer-events: none;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, var(--cl-glow), transparent 62%);
+  animation: convo-glow var(--cl-time) var(--cl-ease) infinite;
+}
+.convo-loader__robot {
+  position: relative; display: block; width: 100%; height: auto;
+  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, .22));
+  animation: convo-float var(--cl-time) var(--cl-ease) infinite;
+  user-select: none; -webkit-user-drag: none;
+}
+.convo-loader__shadow {
+  position: absolute; left: 50%; bottom: 0; width: 74%; height: 14px; margin-left: -37%;
+  border-radius: 50%; pointer-events: none; filter: blur(1.5px);
+  background:
+    radial-gradient(ellipse at center, rgba(var(--cl-shadow), var(--cl-strength)) 0%, rgba(var(--cl-shadow), 0) 66%),
+    radial-gradient(ellipse at center, var(--cl-floor) 0%, transparent 80%);
+  animation: convo-shadow var(--cl-time) var(--cl-ease) infinite;
+}
+.convo-loader__text { margin: 0; color: var(--cl-text); font-size: 14px; font-weight: 600; }
+@keyframes convo-float {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-16px) rotate(1deg); }
+}
+@keyframes convo-shadow {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(.6); opacity: .45; }
+}
+@keyframes convo-glow {
+  0%, 100% { opacity: .65; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+}
+@keyframes convo-fade { from { opacity: 0; } to { opacity: 1; } }

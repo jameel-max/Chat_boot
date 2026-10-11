@@ -353,6 +353,80 @@ function scrollToLatest() {
   conversation.scrollTop = conversation.scrollHeight;
 }
 
+const COPY_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
+const CHECK_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // ننتقل إلى الطريقة البديلة
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.cssText = "position:fixed;top:0;left:-9999px;opacity:0";
+  document.body.append(area);
+  area.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+  area.remove();
+  return copied;
+}
+
+function createCopyButton(className, label, getText) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.title = label;
+
+  const icon = document.createElement("span");
+  icon.className = "copy-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = COPY_ICON;
+
+  const text = document.createElement("span");
+  text.className = "copy-label";
+  text.setAttribute("aria-live", "polite");
+  text.textContent = label;
+
+  button.append(icon, text);
+
+  let timer = 0;
+  button.addEventListener("click", async () => {
+    const copied = await copyToClipboard(getText());
+    window.clearTimeout(timer);
+    icon.innerHTML = copied ? CHECK_ICON : COPY_ICON;
+    text.textContent = copied ? "تم النسخ" : "تعذّر النسخ";
+    button.classList.toggle("copied", copied);
+    if (!copied) showToast("تعذّر النسخ، انسخ النص يدويًا.");
+    timer = window.setTimeout(() => {
+      icon.innerHTML = COPY_ICON;
+      text.textContent = label;
+      button.classList.remove("copied");
+    }, 1800);
+  });
+  return button;
+}
+
+// زر "نسخ الرد" تحت كل رد من فهيم (يُنسخ نص الرد الأصلي بما فيه الأكواد والمعادلات)
+function addReplyActions(body, text) {
+  if (!text || body.querySelector(".message-actions")) return;
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  actions.append(createCopyButton("copy-button", "نسخ الرد", () => text));
+  body.append(actions);
+}
+
 function appendMessage(role, text, imageUrl = null) {
   welcome.classList.add("hidden");
   const message = document.createElement("article");
@@ -381,6 +455,7 @@ function appendMessage(role, text, imageUrl = null) {
     content.className = "message-text";
     renderMarkdown(content, text);
     body.append(content);
+    if (role === "assistant") addReplyActions(body, text);
   }
   message.append(avatar, body);
   conversation.append(message);
@@ -478,7 +553,11 @@ function renderMarkdown(element, text) {
 
     const header = document.createElement("div");
     header.className = "code-header";
-    header.textContent = codeLanguage || "code";
+    const language = document.createElement("span");
+    language.className = "code-language";
+    language.textContent = codeLanguage || "code";
+    const source = codeLines.join("\n");
+    header.append(language, createCopyButton("code-copy", "نسخ", () => source));
 
     const pre = document.createElement("pre");
     pre.dir = "ltr";
@@ -1375,23 +1454,116 @@ async function loadHistory() {
   renderHistory(result.conversations.filter((item) => !pendingDeletes.has(item.id)));
 }
 
+const CONVERSATION_LOADER_DELAY_MS = 120;
+let conversationLoadToken = 0;
+let loadingConversationId = null;
+
+function markActiveHistoryEntry(id) {
+  for (const entry of historyList.querySelectorAll(".history-entry")) {
+    entry.classList.toggle("active", entry.dataset.id === id);
+  }
+}
+
+function createConversationLoader() {
+  const loader = document.createElement("div");
+  loader.className = "convo-loader";
+  loader.setAttribute("role", "status");
+  loader.setAttribute("aria-live", "polite");
+
+  const stage = document.createElement("div");
+  stage.className = "convo-loader__stage";
+  const glow = document.createElement("div");
+  glow.className = "convo-loader__glow";
+
+  const picture = document.createElement("picture");
+  const source = document.createElement("source");
+  source.srcset = "/loader-robot.webp";
+  source.type = "image/webp";
+  const robot = document.createElement("img");
+  robot.className = "convo-loader__robot";
+  robot.src = "/loader-robot.png";
+  robot.alt = "";
+  robot.width = 420;
+  robot.height = 510;
+  robot.decoding = "async";
+  robot.draggable = false;
+  picture.append(source, robot);
+
+  const shadow = document.createElement("div");
+  shadow.className = "convo-loader__shadow";
+  stage.append(glow, picture, shadow);
+
+  const text = document.createElement("p");
+  text.className = "convo-loader__text";
+  text.textContent = "جارٍ فتح المحادثة";
+  const dots = document.createElement("span");
+  dots.className = "loader-dots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 3; index += 1) {
+    dots.append(document.createElement("i"));
+  }
+  text.append(dots);
+
+  loader.append(stage, text);
+  return loader;
+}
+
 async function loadConversation(id) {
-  if (sendButton.disabled) return;
-  const result = await apiRequest(`/api/conversations/${encodeURIComponent(id)}`);
+  if (sendButton.disabled) {
+    showToast("انتظر حتى ينتهي فهيم من الرد ثم افتح المحادثة.");
+    return;
+  }
+  // ضغط متكرر على نفس المحادثة أثناء فتحها: نتجاهله بدل إرسال طلبات مكررة
+  if (loadingConversationId === id) return;
+
+  const token = ++conversationLoadToken;
+  loadingConversationId = id;
+  markActiveHistoryEntry(id);
+  setMobileMenuOpen(false);
+
+  // إن تأخر الفتح نعرض الروبوت فورًا ليعرف الطالب أن المحادثة تُحمَّل
+  let loaderShown = false;
+  const loaderTimer = window.setTimeout(() => {
+    if (token !== conversationLoadToken) return;
+    loaderShown = true;
+    welcome.classList.add("hidden");
+    conversation.replaceChildren(createConversationLoader());
+    conversation.setAttribute("aria-busy", "true");
+  }, CONVERSATION_LOADER_DELAY_MS);
+
+  let result;
+  try {
+    result = await apiRequest(`/api/conversations/${encodeURIComponent(id)}`);
+  } catch (error) {
+    if (token === conversationLoadToken) {
+      if (loaderShown) {
+        conversation.replaceChildren(welcome);
+        welcome.classList.remove("hidden");
+        currentConversationId = null;
+      }
+      markActiveHistoryEntry(currentConversationId);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(loaderTimer);
+    if (token === conversationLoadToken) {
+      loadingConversationId = null;
+      conversation.removeAttribute("aria-busy");
+    }
+  }
+
+  // اختار الطالب محادثة أخرى (أو بدأ محادثة جديدة) أثناء التحميل
+  if (token !== conversationLoadToken) return;
+
   currentConversationId = result.conversation.id;
   conversation.replaceChildren();
   welcome.classList.add("hidden");
-  setMobileMenuOpen(false);
 
   for (const message of result.messages) {
     const imageUrl = message.image
       ? `data:${message.image.mimeType};base64,${message.image.data}`
       : null;
-    const body = appendMessage(
-      message.role,
-      message.content,
-      imageUrl,
-    );
+    appendMessage(message.role, message.content, imageUrl);
   }
   if (!result.messages.length) {
     welcome.classList.remove("hidden");
@@ -1445,7 +1617,7 @@ function sendConversationDelete(id, attempt = 0) {
 
 function deleteConversation(record) {
   if (!window.confirm(`هل تريد حذف محادثة «${record.title}» نهائيًا؟`)) return;
-  const isActive = currentConversationId === record.id;
+  const isActive = currentConversationId === record.id || loadingConversationId === record.id;
   if (isActive && sendButton.disabled) {
     showToast("انتظر حتى ينتهي فهيم من الرد ثم احذف المحادثة.");
     return;
@@ -1691,6 +1863,7 @@ markPhotoBackgrounds();
 window.addEventListener("load", markPhotoBackgrounds);
 
 function afterAuthenticated() {
+  new Image().src = "/loader-robot.webp"; // تُخزَّن مسبقًا لتظهر شاشة فتح المحادثة فورًا
   refreshUploadQuota();
   loadThemePreference();
 }
@@ -1849,6 +2022,11 @@ async function sendMessage(message) {
     currentConversationId = result.conversationId;
     refreshHistory = true;
 
+    const nearBottom =
+      conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 200;
+    addReplyActions(assistantBody, result.answer);
+    if (nearBottom) scrollToLatest();
+
   } catch (error) {
     assistantBody.remove();
 
@@ -1990,6 +2168,9 @@ document.querySelectorAll(".suggestion").forEach((button) => {
 
 function resetChat() {
   if (sendButton.disabled) return;
+  conversationLoadToken += 1;
+  loadingConversationId = null;
+  conversation.removeAttribute("aria-busy");
   conversation.replaceChildren(welcome);
   welcome.classList.remove("hidden");
   removeSelectedImage();
