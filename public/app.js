@@ -83,6 +83,13 @@ const authDescription = document.querySelector("#auth-description");
 const authSubmit = document.querySelector("#auth-submit");
 const authModeToggle = document.querySelector("#auth-mode-toggle");
 const rememberDevice = document.querySelector("#remember-device");
+const authTitle = document.querySelector("#auth-title");
+const authNameLabel = document.querySelector("#auth-name-label");
+const authNameHint = document.querySelector("#auth-name-hint");
+const authGradeField = document.querySelector("#auth-grade-field");
+const authPasswordConfirm = document.querySelector("#auth-password-confirm");
+const authConfirmGroup = document.querySelector("#auth-confirm-group");
+const authPasswordHint = document.querySelector("#auth-password-hint");
 
 /* ============================================================
  * دعم الرياضيات (LaTeX) عبر KaTeX
@@ -1638,20 +1645,100 @@ function deleteConversation(record) {
   sendConversationDelete(record.id);
 }
 
+// ===== الاسم الرباعي: نفس قواعد الخادم (يُدمج عبد الله / أبو حماد / بن علي كاسم واحد) =====
+const NAME_PREFIXES = new Set(["عبد", "ابو", "ابن", "بن", "ام", "ال", "بنت"]);
+const PASSWORD_MIN_LENGTH = 10;
+const NAME_HINT_DEFAULT = "اكتب اسمك، واسم أبيك، واسم جدك، واسم العائلة.";
+
+function normalizeArabic(text) {
+  return text
+    .replace(/[\u064b-\u065f\u0670\u0640]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function countNameTokens(text) {
+  const words = normalizeArabic(text).split(" ").filter(Boolean);
+  let count = 0;
+  for (let index = 0; index < words.length; index += 1) {
+    if (NAME_PREFIXES.has(words[index]) && index + 1 < words.length) index += 1;
+    count += 1;
+  }
+  return count;
+}
+
+// يعيد رسالة الخطأ أو نصًا فارغًا إذا كان الاسم رباعيًا صحيحًا
+function validateFullNameClient(text) {
+  const normalized = normalizeArabic(text);
+  if (!normalized) return "اكتب اسمك الرباعي.";
+  if (!/^[\u0621-\u064a ]+$/.test(normalized)) {
+    return "اكتب الاسم بالأحرف العربية فقط، دون أرقام أو رموز.";
+  }
+  const count = countNameTokens(text);
+  if (count !== 4) {
+    return `اكتب اسمك الرباعي كاملًا: اسمك، اسم أبيك، اسم جدك، اسم العائلة. عدد الأسماء التي كتبتها: ${count.toLocaleString("ar")}.`;
+  }
+  return "";
+}
+
+function updateNameHint() {
+  if (authMode !== "register") return;
+  const text = authEmail.value;
+  let message = NAME_HINT_DEFAULT;
+  let state = "";
+  if (normalizeArabic(text)) {
+    const error = validateFullNameClient(text);
+    const count = countNameTokens(text);
+    if (!error) {
+      message = "✓ اسم رباعي صحيح";
+      state = "ok";
+    } else if (!/^[\u0621-\u064a ]+$/.test(normalizeArabic(text))) {
+      message = "اكتب الاسم بالأحرف العربية فقط.";
+      state = "warn";
+    } else if (count > 4) {
+      message = "الاسم أكثر من أربعة أسماء. اكتب الأسماء الأربعة فقط.";
+      state = "warn";
+    } else {
+      message = `الأسماء المكتوبة: ${count.toLocaleString("ar")} من ٤`;
+    }
+  }
+  authNameHint.textContent = message;
+  authNameHint.classList.toggle("ok", state === "ok");
+  authNameHint.classList.toggle("warn", state === "warn");
+}
+
 function setAuthMode(mode) {
   authMode = mode;
   const isRegistering = mode === "register";
+  authTitle.textContent = isRegistering ? "أنشئ حسابك في فهيم" : "أهلًا بك في فهيم";
   authDescription.textContent = isRegistering
-    ? "أنشئ حسابًا بالبريد وكلمة المرور لحفظ محادثاتك."
-    : "سجّل الدخول بحسابك للوصول إلى محادثاتك المحفوظة.";
+    ? "اكتب اسمك الرباعي، واختر صفك، وأنشئ كلمة مرور لتبدأ."
+    : "سجّل الدخول باسمك الرباعي وكلمة المرور للوصول إلى محادثاتك.";
   authSubmit.textContent = isRegistering ? "إنشاء حساب" : "تسجيل الدخول";
   authModeToggle.textContent = isRegistering
     ? "لديك حساب؟ سجّل الدخول"
     : "ليس لديك حساب؟ أنشئ حسابًا";
   forgotPasswordLink.classList.toggle("hidden", isRegistering);
+  document
+    .querySelectorAll(".register-only")
+    .forEach((node) => node.classList.toggle("hidden", !isRegistering));
+  authNameLabel.textContent = isRegistering
+    ? "الاسم الرباعي"
+    : "الاسم الرباعي (أو البريد الإلكتروني للأدمن)";
+  authEmail.autocomplete = isRegistering ? "name" : "username";
+  authEmail.placeholder = isRegistering ? "مثال: محمد أحمد علي الحسن" : "اسمك الرباعي";
   authPassword.autocomplete = isRegistering ? "new-password" : "current-password";
-  authPassword.minLength = isRegistering ? 10 : 1;
+  authPassword.placeholder = isRegistering ? "أنشئ كلمة مرور" : "أدخل كلمة المرور";
+  authPassword.minLength = isRegistering ? PASSWORD_MIN_LENGTH : 1;
+  authPasswordConfirm.required = isRegistering;
+  authForm.querySelectorAll('input[name="grade"]').forEach((radio) => {
+    radio.required = isRegistering;
+  });
   authError.textContent = "";
+  updateNameHint();
 }
 
 // ===== شاشة التحميل: تظهر أثناء التحقق من الجلسة بدل وميض نافذة تسجيل الدخول =====
@@ -2182,6 +2269,10 @@ function resetChat() {
 }
 
 setupSpeechRecognition();
+authEmail.addEventListener("input", updateNameHint);
+// أول زيارة: إنشاء حساب أولًا، ومن سبق أن سجّل دخوله يرى تسجيل الدخول
+setAuthMode(document.documentElement.classList.contains("no-loader") ? "register" : "login");
+
 initializeApp();
 
 authModeToggle.addEventListener("click", () => {
@@ -2195,7 +2286,9 @@ function closePasswordOverlay() {
 }
 
 forgotPasswordLink.addEventListener("click", () => {
-  helpGuestEmail.value = authEmail.value.trim();
+  const typed = authEmail.value.trim();
+  if (typed.includes("@")) helpGuestEmail.value = typed;
+  else helpGuestName.value = typed;
   openHelpCenter({ guest: true });
 });
 document.querySelectorAll(".password-toggle").forEach((button) => {
@@ -2358,24 +2451,63 @@ changePasswordForm.addEventListener("submit", async (event) => {
 
 authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!authForm.reportValidity()) return;
-  authSubmit.disabled = true;
   authError.textContent = "";
+  const registering = authMode === "register";
+  let body;
+
+  if (registering) {
+    const nameError = validateFullNameClient(authEmail.value);
+    if (nameError) {
+      authError.textContent = nameError;
+      authEmail.focus();
+      return;
+    }
+    const grade = authForm.querySelector('input[name="grade"]:checked')?.value;
+    if (!grade) {
+      authError.textContent = "اختر صفك الدراسي.";
+      return;
+    }
+    if (authPassword.value.length < PASSWORD_MIN_LENGTH) {
+      authError.textContent = `أنشئ كلمة مرور من ${PASSWORD_MIN_LENGTH.toLocaleString("ar")} أحرف على الأقل.`;
+      authPassword.focus();
+      return;
+    }
+    if (authPassword.value !== authPasswordConfirm.value) {
+      authError.textContent = "كلمتا المرور غير متطابقتين.";
+      authPasswordConfirm.focus();
+      return;
+    }
+    body = {
+      fullName: authEmail.value.trim(),
+      grade,
+      password: authPassword.value,
+      remember: rememberDevice.checked,
+    };
+  } else {
+    if (!authForm.reportValidity()) return;
+    body = {
+      identifier: authEmail.value.trim(),
+      password: authPassword.value,
+      remember: rememberDevice.checked,
+    };
+  }
+
+  authSubmit.disabled = true;
   try {
     const result = await apiRequest(
-      authMode === "register" ? "/api/auth/register" : "/api/auth/login",
+      registering ? "/api/auth/register" : "/api/auth/login",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: authEmail.value,
-          password: authPassword.value,
-          remember: rememberDevice.checked,
-        }),
+        body: JSON.stringify(body),
       },
     );
     setAuthenticated(result.user, result.isAdmin, result.isPrimaryAdmin);
     authPassword.value = "";
+    authPasswordConfirm.value = "";
+    authForm.querySelectorAll('input[name="grade"]').forEach((radio) => {
+      radio.checked = false;
+    });
     setAuthMode("login");
     await loadHistory();
   } catch (error) {
@@ -2410,10 +2542,16 @@ logoutButton.addEventListener("click", async () => {
   }
 });
 
-adminButton.addEventListener("click", async () => {
-  adminOverlay.classList.remove("hidden");
+adminButton.addEventListener("click", () => {
   setMobileMenuOpen(false);
-  await loadAdminDashboard();
+  // تفتح لوحة التحكم في تبويب جديد (الجلسة نفسها، فلا تحتاج لتسجيل دخول ثانٍ)
+  const link = document.createElement("a");
+  link.href = "/admin.html";
+  link.target = "_blank";
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
 });
 window.setInterval(() => {
   if (!adminOverlay.classList.contains("hidden")) {
