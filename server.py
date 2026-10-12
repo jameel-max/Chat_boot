@@ -83,10 +83,11 @@ ALLOWED_DOCUMENT_EXTENSIONS = {
 database = None
 _database_lock = threading.Lock()
 
+
 SYSTEM_INSTRUCTION = (
     "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
-    "وإذا سُئلت عن مطورك قل: «صنعني المطور جميل إسماعيل أبو حماد». لا تغيّرهما. "
-    "أنت مساعد نصي لا ينشئ الصور؛ وضّح ذلك باختصار وساعد بكتابة وصف للصورة أو بتحليل صورة يرسلها الطالب."
+    "اصنع جداولا تنظيمية اذ استدعا الامر"
+    "اذا سالك الطالب من الذي طورك قل طورني المبرمج جميل اسماعيل ابو حماد"
 )
 
 GRADE_NAMES = {
@@ -944,6 +945,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
         self.new_visitor_token = secrets.token_urlsafe(32)
         return self.new_visitor_token
 
+    
     def do_GET(self):
         page_path = urlsplit(self.path).path.rstrip("/") or "/"
         accepts_html = "text/html" in self.headers.get("Accept", "").lower()
@@ -952,14 +954,38 @@ class ChatHandler(SimpleHTTPRequestHandler):
             or self.headers.get("Sec-Fetch-Dest", "").lower() == "document"
             or self.headers.get("Sec-Fetch-Mode", "").lower() == "navigate"
         )
+
+        # تسجيل زيارة الصفحة الرئيسية.
         if page_path in {"/", "/index.html"} and is_document:
             get_database().record_page_view(
-                self.page_visitor_token(), dedup_seconds=VISIT_DEDUP_SECONDS
+                self.page_visitor_token(),
+                dedup_seconds=VISIT_DEDUP_SECONDS,
             )
+
         user = self.current_user()
+
+        # توجيه الزائر غير المسجل إلى صفحة تسجيل الدخول.
+        # الرابط النسبي يعمل على Render ومحليًا على نفس الخادم.
+        if page_path in {"/", "/index.html"} and is_document and not user:
+            self.send_response(302)
+            self.send_header("Location", "/login.html")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+
+        # إذا كان المستخدم مسجلًا وفتح صفحة الدخول، أعده إلى فهيم.
+        if page_path == "/login.html" and is_document and user:
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+
         if self.path == "/api/me":
             if not user:
-                self.send_json({"error": "سجّل الدخول للمتابعة."}, 401)
+                self.send_json(
+                    {"error": "سجّل الدخول للمتابعة."}, 401
+                )
             else:
                 self.send_json(
                     {
@@ -974,7 +1000,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
             if not user:
                 self.send_unauthorized()
             else:
-                self.send_json({"preferences": USER_PREFERENCES.get(user["id"])})
+                self.send_json(
+                    {"preferences": USER_PREFERENCES.get(user["id"])}
+                )
             return
 
         if self.path == "/api/uploads/quota":
@@ -989,10 +1017,19 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_unauthorized()
                 return
             if not self.is_admin(user):
-                self.send_json({"error": "ليس لديك صلاحية لفتح لوحة التحكم."}, 403)
+                self.send_json(
+                    {"error": "ليس لديك صلاحية لفتح لوحة التحكم."}, 403
+                )
                 return
-            admin_email = os.environ.get("ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL).strip()
-            self.send_json(decorate_dashboard(get_database().admin_dashboard(admin_email)))
+
+            admin_email = os.environ.get(
+                "ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL
+            ).strip()
+            self.send_json(
+                decorate_dashboard(
+                    get_database().admin_dashboard(admin_email)
+                )
+            )
             return
 
         if self.path == "/api/admin/statistics":
@@ -1000,8 +1037,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_unauthorized()
                 return
             if not self.is_admin(user):
-                self.send_json({"error": "ليس لديك صلاحية لفتح لوحة التحكم."}, 403)
+                self.send_json(
+                    {"error": "ليس لديك صلاحية لفتح لوحة التحكم."}, 403
+                )
                 return
+
             self.send_json(get_database().admin_statistics())
             return
 
@@ -1011,11 +1051,20 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 return
             if not self.is_admin(user):
                 self.send_json(
-                    {"error": "ليس لديك صلاحية لعرض رسائل مركز المساعدة."}, 403
+                    {
+                        "error":
+                            "ليس لديك صلاحية لعرض رسائل مركز المساعدة."
+                    },
+                    403,
                 )
                 return
+
             self.send_json(
-                {"messages": decorate_support_messages(get_database().list_support_messages())}
+                {
+                    "messages": decorate_support_messages(
+                        get_database().list_support_messages()
+                    )
+                }
             )
             return
 
@@ -1023,20 +1072,33 @@ class ChatHandler(SimpleHTTPRequestHandler):
             if not user:
                 self.send_unauthorized()
                 return
+
             self.send_json(
-                {"conversations": get_database().list_conversations(user["id"])}
+                {
+                    "conversations": get_database().list_conversations(
+                        user["id"]
+                    )
+                }
             )
             return
 
-        match = re.fullmatch(r"/api/conversations/([a-f0-9]{32})", self.path)
+        match = re.fullmatch(
+            r"/api/conversations/([a-f0-9]{32})", self.path
+        )
         if match:
             if not user:
                 self.send_unauthorized()
                 return
-            record = get_database().get_conversation(user["id"], match.group(1))
+
+            record = get_database().get_conversation(
+                user["id"], match.group(1)
+            )
             if not record:
-                self.send_json({"error": "المحادثة غير موجودة."}, 404)
+                self.send_json(
+                    {"error": "المحادثة غير موجودة."}, 404
+                )
                 return
+
             conversation, messages = record
             self.send_json(
                 {
@@ -1062,9 +1124,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        # تقديم الملفات الثابتة، ومنها login.html وملفات CSS وJavaScript.
         self._static_cache_control = self.static_cache_control()
         if self.serve_static_file():
             return
+
         super().do_GET()
 
     def static_cache_control(self):
