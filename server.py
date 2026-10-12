@@ -12,6 +12,7 @@ import smtplib
 import ssl
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import parseaddr
@@ -43,6 +44,24 @@ UPLOAD_QUOTA_PATH = Path(__file__).resolve().parent / "data" / "upload_quota.jso
 JORDAN_TZ = timezone(timedelta(hours=3))  # توقيت الأردن (UTC+3) لتصفير العداد عند منتصف الليل
 USER_PREFERENCES_PATH = Path(__file__).resolve().parent / "data" / "user_preferences.json"
 ALLOWED_THEMES = {"light", "dark"}
+
+# ===== حسابات الطلاب: الاسم الرباعي + الصف + كلمة المرور =====
+USER_PROFILES_PATH = Path(__file__).resolve().parent / "data" / "user_profiles.json"
+# الحساب يُخزَّن في قاعدة البيانات ببريد داخلي مشتق من الاسم الرباعي (لا يُعرض للطالب)
+STUDENT_EMAIL_DOMAIN = "students.faheem.local"
+# مفتاح الصف كما يختاره الطالب -> الاسم المعروض + القيمة التي يفهمها فهيم (GRADE_NAMES)
+GRADE_CHOICES = {
+    "8": {"label": "الثامن", "stored": "الثامن"},
+    "9": {"label": "التاسع", "stored": "التاسع"},
+    "10": {"label": "العاشر", "stored": "العاشر"},
+    "11": {"label": "الأول الثانوي", "stored": "الحادي عشر"},
+    "12": {"label": "الثاني الثانوي", "stored": "الثاني عشر"},
+}
+GRADE_ORDER = ["8", "9", "10", "11", "12"]
+STORED_TO_GRADE_KEY = {value["stored"]: key for key, value in GRADE_CHOICES.items()}
+# كلمات تُدمج مع التي بعدها لتُحسب اسمًا واحدًا: عبد الله، أبو حماد، بن علي ...
+NAME_PREFIXES = {"عبد", "ابو", "ابن", "بن", "ام", "ال", "بنت"}
+PASSWORD_MIN_LENGTH = 10
 MAX_CONTEXT_IMAGES = 32
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
@@ -64,17 +83,10 @@ ALLOWED_DOCUMENT_EXTENSIONS = {
 database = None
 _database_lock = threading.Lock()
 
-
 SYSTEM_INSTRUCTION = (
     "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
-    "أجب مباشرة وباختصار مفيد، ووسّع الشرح فقط عند الحاجة أو بطلب الطالب. "
-    "تجنب المقدمات والحشو والتكرار والنصائح العامة غير المطلوبة. "
-    "لا تفترض معلومات عن الطالب أو جدوله الدراسي دون دليل، "
-    "ولا تضف سؤال متابعة في نهاية كل إجابة تلقائيًا. "
-    "عند كتابة المعادلات والرموز الرياضية، استخدم LaTeX "
-    "داخل \\(...\\) للمعادلات القصيرة و\\[...\\] للمعادلات المستقلة، "
-    "واستخدم \\begin{cases} و\\end{cases} للاقترانات المتشعبة. "
-    "لا تستخدم التنسيق الرياضي إلا عندما يخدم الإجابة."
+    "وإذا سُئلت عن مطورك قل: «صنعني المطور جميل إسماعيل أبو حماد». لا تغيّرهما. "
+    "أنت مساعد نصي لا ينشئ الصور؛ وضّح ذلك باختصار وساعد بكتابة وصف للصورة أو بتحليل صورة يرسلها الطالب."
 )
 
 GRADE_NAMES = {
@@ -574,6 +586,14 @@ class UploadQuota:
             self._save()
             return True, self._status(entry)
 
+    def refund(self, user_id):
+        """يعيد مرفقًا واحدًا (فشل الطلب قبل أن يبدأ الرد أو أُوقف قبل أي نص)."""
+        with self.lock:
+            entry = self._entry(user_id)
+            if entry["used"] > 0:
+                entry["used"] -= 1
+                self._save()
+
 
 class UserPreferences:
     """تفضيلات كل مستخدم (المظهر) تُحفظ في ملف JSON."""
@@ -612,6 +632,242 @@ class UserPreferences:
 
 UPLOAD_QUOTA = UploadQuota(UPLOAD_QUOTA_PATH)
 USER_PREFERENCES = UserPreferences(USER_PREFERENCES_PATH)
+
+
+_ARABIC_MARKS = re.compile(r"[\u064b-\u065f\u0670\u0640]")
+
+
+def normalize_arabic(text):
+    """يوحّد الهمزات والتاء المربوطة والياء ويحذف التشكيل والمدّ ليتطابق الاسم مهما اختلف إملاؤه."""
+    text = _ARABIC_MARKS.sub("", text)
+    text = text.translate(
+        str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي", "ة": "ه"})
+    )
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def name_tokens(text):
+    """يقسّم الاسم إلى أسمائه بعد دمج (عبد الله / أبو حماد / بن علي) كاسم واحد."""
+    words = [word for word in normalize_arabic(text).split(" ") if word]
+    tokens = []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word in NAME_PREFIXES and index + 1 < len(words):
+            tokens.append(word + words[index + 1])
+            index += 2
+        else:
+            tokens.append(word)
+            index += 1
+    return tokens
+
+
+def validate_full_name(raw):
+    """يعيد (الاسم المنظّف، رسالة الخطأ). الاسم المقبول: أربعة أسماء عربية بالضبط."""
+    if not isinstance(raw, str):
+        return None, "اكتب اسمك الرباعي."
+    display = _ARABIC_MARKS.sub("", re.sub(r"\s+", " ", raw).strip())
+    if not display:
+        return None, "اكتب اسمك الرباعي."
+    if len(display) > 80:
+        return None, "الاسم طويل جدًا. اكتب اسمك الرباعي فقط."
+    if not re.fullmatch(r"[\u0621-\u064a ]+", normalize_arabic(display)):
+        return None, "اكتب الاسم بالأحرف العربية فقط، دون أرقام أو رموز."
+    tokens = name_tokens(display)
+    if len(tokens) != 4:
+        return None, (
+            "اكتب اسمك الرباعي كاملًا: اسمك، اسم أبيك، اسم جدك، اسم العائلة. "
+            f"عدد الأسماء التي كتبتها: {len(tokens)}."
+        )
+    if any(len(token) < 2 or len(token) > 30 for token in tokens):
+        return None, "تأكد من كتابة كل اسم بشكل صحيح."
+    if len(set(tokens)) < 2:
+        return None, "اكتب اسمك الحقيقي الرباعي."
+    return display, None
+
+
+def student_email(tokens):
+    return ".".join(tokens) + "@" + STUDENT_EMAIL_DOMAIN
+
+
+def student_name_from_email(email):
+    local, _, domain = str(email).rpartition("@")
+    if domain != STUDENT_EMAIL_DOMAIN:
+        return None
+    return local.replace(".", " ")
+
+
+class UserProfiles:
+    """الاسم الرباعي والصف المختار عند التسجيل (ملف JSON)."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.lock = threading.Lock()
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = {}
+        self.data = raw if isinstance(raw, dict) else {}
+
+    def get(self, user_id):
+        with self.lock:
+            entry = self.data.get(str(user_id))
+            return dict(entry) if isinstance(entry, dict) else None
+
+    def set(self, user_id, full_name, grade_key):
+        with self.lock:
+            self.data[str(user_id)] = {"fullName": full_name, "grade": grade_key}
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = self.path.with_suffix(".tmp")
+                temporary.write_text(
+                    json.dumps(self.data, ensure_ascii=False), encoding="utf-8"
+                )
+                temporary.replace(self.path)
+            except OSError as error:
+                print(f"[PROFILES] تعذّر حفظ الملف الشخصي: {error}", flush=True)
+
+
+USER_PROFILES = UserProfiles(USER_PROFILES_PATH)
+
+
+def decorate_user(user):
+    """يضيف الاسم الرباعي والصف إلى بيانات المستخدم المرسلة للواجهة."""
+    result = dict(user)
+    profile = USER_PROFILES.get(user["id"]) or {}
+    full_name = profile.get("fullName") or student_name_from_email(user.get("email", ""))
+    if student_name_from_email(user.get("email", "")):
+        result["isStudentAccount"] = True
+    if full_name:
+        result["name"] = full_name
+    grade_key = profile.get("grade")
+    if grade_key in GRADE_CHOICES:
+        result["gradeLabel"] = GRADE_CHOICES[grade_key]["label"]
+    return result
+
+
+def grade_percentages(counts, total):
+    """نسب مئوية صحيحة مجموعها 100 (طريقة أكبر باقٍ)."""
+    if not total:
+        return {key: 0 for key in counts}
+    raw = {key: counts[key] * 100 / total for key in counts}
+    floors = {key: int(value) for key, value in raw.items()}
+    leftover = 100 - sum(floors.values())
+    for key in sorted(counts, key=lambda k: raw[k] - floors[k], reverse=True)[:leftover]:
+        floors[key] += 1
+    return floors
+
+
+class GradeDirectory:
+    """صف كل مستخدم من قاعدة البيانات مع تخزين مؤقت قصير وجلب متوازٍ."""
+
+    TTL_SECONDS = 60
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.cache = {}
+
+    def grades_for(self, user_ids):
+        now = time.monotonic()
+        result = {}
+        missing = []
+        with self.lock:
+            for user_id in user_ids:
+                hit = self.cache.get(user_id)
+                if hit and now - hit[0] < self.TTL_SECONDS:
+                    result[user_id] = hit[1]
+                else:
+                    missing.append(user_id)
+        if missing:
+
+            def fetch(user_id):
+                profile = USER_PROFILES.get(user_id) or {}
+                try:
+                    preferences = get_database().get_student_preferences(user_id)
+                except Exception as error:
+                    print(f"[GRADES] تعذّر جلب صف {user_id}: {error}", flush=True)
+                    return user_id, profile.get("grade"), False
+                key = STORED_TO_GRADE_KEY.get(preferences.get("grade")) or profile.get("grade")
+                return user_id, key if key in GRADE_CHOICES else None, True
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                for user_id, key, ok in pool.map(fetch, missing):
+                    result[user_id] = key
+                    if ok:
+                        with self.lock:
+                            self.cache[user_id] = (now, key)
+        return result
+
+    def forget(self, user_id):
+        with self.lock:
+            self.cache.pop(user_id, None)
+
+
+GRADE_DIRECTORY = GradeDirectory()
+
+
+def decorate_support_messages(messages):
+    """يعرض اسم الطالب الرباعي وصفه بدل البريد الداخلي في رسائل مركز المساعدة."""
+    if not isinstance(messages, list):
+        return messages
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        derived = student_name_from_email(message.get("user_email", ""))
+        if not derived:
+            continue
+        profile = USER_PROFILES.get(message.get("user_id")) or {}
+        message["user_name"] = profile.get("fullName") or derived
+        grade_key = profile.get("grade")
+        message["user_email"] = (
+            f"الصف {GRADE_CHOICES[grade_key]['label']}"
+            if grade_key in GRADE_CHOICES
+            else "حساب طالب"
+        )
+    return messages
+
+
+def decorate_dashboard(data):
+    """يضيف أسماء الطلاب وصفوفهم ونسب الصفوف إلى بيانات لوحة التحكم."""
+    users = data.get("users") if isinstance(data, dict) else None
+    if not isinstance(users, list):
+        return data
+    users = [user for user in users if isinstance(user, dict) and "id" in user]
+    grades = GRADE_DIRECTORY.grades_for([user["id"] for user in users])
+    counts = {key: 0 for key in GRADE_ORDER}
+    unspecified = 0
+    for user in users:
+        email = str(user.get("email", ""))
+        derived = student_name_from_email(email)
+        if derived:
+            profile = USER_PROFILES.get(user["id"]) or {}
+            user["is_student"] = True
+            user["name"] = profile.get("fullName") or derived
+        key = grades.get(user["id"])
+        if key:
+            user["grade_label"] = GRADE_CHOICES[key]["label"]
+        if not user.get("is_admin"):
+            if key:
+                counts[key] += 1
+            else:
+                unspecified += 1
+    total = sum(counts.values())
+    percents = grade_percentages(counts, total)
+    data["gradeStats"] = {
+        "total": total,
+        "unspecified": unspecified,
+        "grades": [
+            {
+                "key": key,
+                "label": GRADE_CHOICES[key]["label"],
+                "count": counts[key],
+                "percent": percents[key],
+                "exact": round(counts[key] * 100 / total, 1) if total else 0,
+            }
+            for key in GRADE_ORDER
+        ],
+    }
+    return data
 
 
 class GeminiStream:
@@ -707,7 +963,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             else:
                 self.send_json(
                     {
-                        "user": user,
+                        "user": decorate_user(user),
                         "isAdmin": self.is_admin(user),
                         "isPrimaryAdmin": self.is_primary_admin(user),
                     }
@@ -736,7 +992,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_json({"error": "ليس لديك صلاحية لفتح لوحة التحكم."}, 403)
                 return
             admin_email = os.environ.get("ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL).strip()
-            self.send_json(get_database().admin_dashboard(admin_email))
+            self.send_json(decorate_dashboard(get_database().admin_dashboard(admin_email)))
             return
 
         if self.path == "/api/admin/statistics":
@@ -759,7 +1015,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 )
                 return
             self.send_json(
-                {"messages": get_database().list_support_messages()}
+                {"messages": decorate_support_messages(get_database().list_support_messages())}
             )
             return
 
@@ -884,6 +1140,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self._do_POST()
         finally:
             self.close_gemini_prewarm()
+            # المرفق لا يُحتسب إن لم يبدأ رد فهيم (خطأ، أو أوقف الطالب قبل أي نص)
+            charged = getattr(self, "_quota_charged", None)
+            if charged is not None and not getattr(self, "_quota_kept", False):
+                UPLOAD_QUOTA.refund(charged)
+            self._quota_charged = None
             total = time.perf_counter() - self._chat_perf_started
             stages = (
                 "student_preferences",
@@ -1054,6 +1315,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         if (image is not None or attachment is not None) and not self.is_admin(user):
             allowed, quota_status = UPLOAD_QUOTA.consume(user["id"])
+            if allowed:
+                self._quota_charged = user["id"]
             if not allowed:
                 self.send_json(
                     {
@@ -1445,23 +1708,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
 
-    def auth_payload(self):
-        payload = self.read_json_body()
-        if payload is None:
-            return None
-        email = payload.get("email")
+    def password_and_remember(self, payload):
         password = payload.get("password")
-        if not isinstance(email, str) or not isinstance(password, str):
-            self.send_json({"error": "أدخل البريد الإلكتروني وكلمة المرور."}, 400)
-            return None
-        email = email.strip().casefold()
-        if (
-            len(email) > 254
-            or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
-        ):
-            self.send_json({"error": "أدخل عنوان بريد إلكتروني صالحًا."}, 400)
-            return None
-        if not password or len(password) > 128:
+        if not isinstance(password, str) or not password or len(password) > 128:
             self.send_json({"error": "كلمة المرور غير صالحة."}, 400)
             return None
         try:
@@ -1473,14 +1722,48 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if not isinstance(remember, bool):
             self.send_json({"error": "إعداد تذكّر الجهاز غير صالح."}, 400)
             return None
-        return email, password, remember
+        return password, remember
+
+    def login_credentials(self):
+        """يقبل الاسم الرباعي (للطلاب) أو البريد الإلكتروني (للأدمن)."""
+        payload = self.read_json_body()
+        if payload is None:
+            return None
+        identifier = payload.get("identifier", payload.get("email"))
+        if not isinstance(identifier, str) or not identifier.strip():
+            self.send_json({"error": "اكتب اسمك الرباعي وكلمة المرور."}, 400)
+            return None
+        identifier = identifier.strip()
+        if "@" in identifier:
+            email = identifier.casefold()
+            if len(email) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+                self.send_json({"error": "أدخل عنوان بريد إلكتروني صالحًا."}, 400)
+                return None
+            is_student = False
+        else:
+            if len(identifier) > 120 or not re.fullmatch(
+                r"[\u0621-\u064a ]+", normalize_arabic(identifier)
+            ):
+                self.send_json({"error": "اكتب اسمك الرباعي بالأحرف العربية كما سجّلته."}, 400)
+                return None
+            tokens = name_tokens(identifier)
+            if len(tokens) < 2:
+                self.send_json({"error": "اكتب اسمك الرباعي كاملًا كما سجّلته."}, 400)
+                return None
+            email = student_email(tokens)
+            is_student = True
+        extra = self.password_and_remember(payload)
+        if extra is None:
+            return None
+        password, remember = extra
+        return email, password, remember, is_student
 
     def send_authenticated_user(self, user, remember):
         lifetime = 365 * 24 * 60 * 60 if remember else 24 * 60 * 60
         token = get_database().create_session(user["id"], lifetime)
         self.send_json(
             {
-                "user": user,
+                "user": decorate_user(user),
                 "isAdmin": self.is_admin(user),
                 "isPrimaryAdmin": self.is_primary_admin(user),
             },
@@ -1544,36 +1827,58 @@ class ChatHandler(SimpleHTTPRequestHandler):
         self.send_json({"ok": True, "isAdmin": is_admin})
 
     def register_account(self):
-        values = self.auth_payload()
-        if not values:
+        payload = self.read_json_body()
+        if payload is None:
             return
-        email, password, remember = values
-        if len(password) < 10:
+        full_name, error = validate_full_name(payload.get("fullName"))
+        if error:
+            self.send_json({"error": error}, 400)
+            return
+        grade_key = str(payload.get("grade", ""))
+        if grade_key not in GRADE_CHOICES:
+            self.send_json({"error": "اختر صفك الدراسي."}, 400)
+            return
+        extra = self.password_and_remember(payload)
+        if extra is None:
+            return
+        password, remember = extra
+        if len(password) < PASSWORD_MIN_LENGTH:
             self.send_json(
-                {"error": "أنشئ كلمة مرور من 10 أحرف على الأقل."}, 400
+                {"error": f"أنشئ كلمة مرور من {PASSWORD_MIN_LENGTH} أحرف على الأقل."}, 400
             )
             return
+        email = student_email(name_tokens(full_name))
         try:
             user = get_database().register_user(email, password)
         except Database.integrity_error_types:
             self.send_json(
-                {"error": "يوجد حساب مسجل بهذا البريد. سجّل الدخول بدلًا من ذلك."},
+                {"error": "هذا الاسم مسجّل مسبقًا. سجّل الدخول بدلًا من إنشاء حساب جديد."},
                 409,
             )
             return
+        USER_PROFILES.set(user["id"], full_name, grade_key)
+        try:
+            get_database().update_student_grade(
+                user["id"], GRADE_CHOICES[grade_key]["stored"]
+            )
+        except Exception as error:
+            print(f"[REGISTER] تعذّر حفظ الصف في قاعدة البيانات: {error}", flush=True)
+        GRADE_DIRECTORY.forget(user["id"])
         self.send_authenticated_user(user, remember)
 
     def login_account(self):
-        values = self.auth_payload()
+        values = self.login_credentials()
         if not values:
             return
-        email, password, remember = values
+        email, password, remember, is_student = values
         if not get_database().user_exists(email):
             self.send_json(
                 {
                     "error": (
-                        "لم يتم العثور على حساب بهذا البريد الإلكتروني. "
-                        "أنشئ حسابًا جديدًا للمتابعة."
+                        "لم يتم العثور على حساب بهذا الاسم. تأكد من كتابة اسمك الرباعي "
+                        "كما سجّلته، أو أنشئ حسابًا جديدًا للمتابعة."
+                        if is_student
+                        else "لم يتم العثور على حساب بهذا البريد الإلكتروني."
                     )
                 },
                 404,
@@ -1581,7 +1886,16 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         user = get_database().login_user(email, password)
         if not user:
-            self.send_json({"error": "البريد الإلكتروني أو كلمة المرور غير صحيحة."}, 401)
+            self.send_json(
+                {
+                    "error": (
+                        "الاسم الرباعي أو كلمة المرور غير صحيحة."
+                        if is_student
+                        else "البريد الإلكتروني أو كلمة المرور غير صحيحة."
+                    )
+                },
+                401,
+            )
             return
         self.send_authenticated_user(user, remember)
 
@@ -2099,6 +2413,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     self.send_sse("delta", {"text": text})
                     answer_parts.append(text)
                     answer_started = True
+                    self._quota_kept = True
             elif event_type == "interaction.completed":
                 self._record_chat_perf(
                     "gemini_total",
