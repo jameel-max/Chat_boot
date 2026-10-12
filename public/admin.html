@@ -6,12 +6,41 @@
   <meta name="theme-color" content="#0d1416">
   <meta name="robots" content="noindex, nofollow">
   <title>لوحة التحكم — فهيم</title>
-  <link rel="icon" type="image/svg+xml" href="/school-logo.png">
+  <link rel="icon" type="image/svg+xml" href="/school-logo.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-      
-              <style>
+  <script
+            async
+            src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+    </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+    <script src="/app.js?v=38" defer></script>
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [["\\(", "\\)"]],
+          displayMath: [["\\[", "\\]"]]
+        },
+
+        options: {
+          skipHtmlTags: [
+            "script",
+            "noscript",
+            "style",
+            "textarea",
+            "pre",
+            "code"
+          ]
+        },
+
+        loader: {
+          load: ["input/tex", "output/chtml"]
+        }
+      };
+</script>
+  <style>
     :root {
       color-scheme: dark;
       --bg: #0d1416;
@@ -83,27 +112,6 @@
     .bar.has i { background: var(--accent); }
     .bar:hover i { background: #9ae9db; }
     .bar-axis { display: flex; justify-content: space-between; margin-top: 8px; color: var(--muted); font-size: 10px; direction: ltr; }
-
-    /* ---------- نسب الصفوف ---------- */
-    .grade-card { margin-bottom: 22px; padding: 18px 20px 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
-    .grade-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-    .grade-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
-    .grade-head span { color: var(--muted); font-size: 12px; }
-    .grade-stack { display: flex; height: 14px; margin: 16px 0 18px; overflow: hidden; border-radius: 999px; background: var(--surface); direction: rtl; }
-    .grade-stack i { display: block; height: 100%; width: 0; background: var(--seg, var(--accent)); transition: width .8s cubic-bezier(.22, 1, .36, 1); }
-    .grade-stack i + i { box-shadow: 2px 0 0 var(--panel); }
-    .grade-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
-    .grade-row { display: grid; grid-template-columns: 118px minmax(0, 1fr) 86px; align-items: center; gap: 14px; }
-    .grade-name { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
-    .grade-name::before { content: ""; flex: 0 0 10px; height: 10px; border-radius: 3px; background: var(--seg, var(--accent)); }
-    .grade-track { height: 10px; overflow: hidden; border-radius: 999px; background: var(--surface); direction: rtl; }
-    .grade-fill { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--seg, var(--accent)); transition: width .9s cubic-bezier(.22, 1, .36, 1); }
-    .grade-value { display: flex; align-items: baseline; justify-content: flex-end; gap: 6px; font-variant-numeric: tabular-nums; }
-    .grade-value strong { font-size: 16px; font-weight: 600; }
-    .grade-value span { color: var(--muted); font-size: 11px; }
-    .grade-row.is-zero .grade-value strong { color: var(--muted); font-weight: 500; }
-    .grade-empty { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
-    .grade-note { margin: 14px 0 0; color: var(--muted); font-size: 11px; }
 
     /* ---------- tabs & tools ---------- */
     .section { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; }
@@ -189,11 +197,6 @@
       .btn { padding: 0 10px; }
       .page-title { font-size: 20px; }
       .stat strong { font-size: 25px; }
-      .grade-card { padding: 16px 16px 18px; }
-      .grade-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name value" "track track"; row-gap: 6px; }
-      .grade-name { grid-area: name; }
-      .grade-value { grid-area: value; }
-      .grade-track { grid-area: track; }
       table, thead, tbody, tr, td { display: block; }
       thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
       tbody tr { padding: 12px 14px; border-bottom: 1px solid var(--border); }
@@ -219,12 +222,12 @@
   <!-- ========== شاشة تسجيل الدخول ========== -->
   <section class="gate hidden" id="login-view">
     <div class="card">
-      <img src="/school-logo.png" alt="شعار المدرسة">
+      <img src="/school-logo.svg" alt="شعار المدرسة">
       <h1>لوحة التحكم</h1>
       <p>سجّل الدخول بحساب أدمن لإدارة المستخدمين ورسائل المساعدة.</p>
       <form class="form" id="login-form">
-        <label for="login-email">الاسم الرباعي أو البريد الإلكتروني</label>
-        <input id="login-email" type="text" autocomplete="username" required maxlength="254" placeholder="اسمك الرباعي أو name@example.com">
+        <label for="login-email">البريد الإلكتروني</label>
+        <input id="login-email" type="email" autocomplete="email" required maxlength="254" placeholder="name@example.com" dir="ltr">
         <label for="login-password">كلمة المرور</label>
         <div class="pw-row">
           <input id="login-password" type="password" autocomplete="current-password" required maxlength="128" placeholder="أدخل كلمة المرور">
@@ -241,7 +244,7 @@
   <!-- ========== لا توجد صلاحية ========== -->
   <section class="gate hidden" id="denied-view">
     <div class="card">
-      <img src="/school-logo.png" alt="شعار المدرسة">
+      <img src="/school-logo.svg" alt="شعار المدرسة">
       <h1>لا تملك صلاحية الدخول</h1>
       <p>هذه الصفحة مخصصة لحسابات الأدمن فقط. سجّل الخروج وادخل بحساب أدمن.</p>
       <div class="form">
@@ -255,7 +258,7 @@
   <div class="hidden" id="dashboard-view">
     <header class="topbar">
       <div class="brand">
-        <img src="/school-logo.png" alt="شعار المدرسة">
+        <img src="/school-logo.svg" alt="شعار المدرسة">
         <div class="brand-copy"><strong>فهيم — لوحة التحكم</strong><small>خريبة السوق الثانوية الثانية للبنين</small></div>
       </div>
       <div class="topbar-actions">
@@ -293,14 +296,6 @@
         </div>
       </div>
 
-      <section class="grade-card" id="grade-card" aria-labelledby="grade-title">
-        <div class="grade-head"><h2 id="grade-title">توزيع الطلاب حسب الصف</h2><span id="grade-total"></span></div>
-        <div class="grade-stack" id="grade-stack" role="img" aria-label="شريط نسب الصفوف"></div>
-        <ul class="grade-list" id="grade-list"></ul>
-        <p class="grade-empty hidden" id="grade-empty">لا توجد صفوف مسجّلة بعد. ستظهر النسب عند تسجيل الطلاب.</p>
-        <p class="grade-note hidden" id="grade-note"></p>
-      </section>
-
       <div class="section">
         <div class="tabs" role="tablist" aria-label="أقسام لوحة التحكم">
           <button class="tab" role="tab" type="button" data-tab="users" aria-selected="true">المستخدمون <span class="count" id="count-users">0</span></button>
@@ -310,11 +305,11 @@
 
         <div class="tab-panel" id="panel-accounts">
           <div class="tools" id="user-tools">
-            <input type="search" id="user-search" placeholder="ابحث بالاسم أو الصف أو البريد..." autocomplete="off" aria-label="البحث عن مستخدم">
+            <input type="search" id="user-search" placeholder="ابحث بالبريد الإلكتروني أو الاسم..." autocomplete="off" aria-label="البحث عن مستخدم">
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>الاسم</th><th>البريد / الصف</th><th>تاريخ التسجيل</th><th>الصلاحية والإجراءات</th></tr></thead>
+              <thead><tr><th>الاسم</th><th>البريد الإلكتروني</th><th>تاريخ التسجيل</th><th>الصلاحية والإجراءات</th></tr></thead>
               <tbody id="accounts-body"></tbody>
             </table>
             <p class="empty hidden" id="accounts-empty"></p>
@@ -334,7 +329,6 @@
               <option value="complaint">شكاوى</option>
               <option value="message">رسائل</option>
             </select>
-            <button class="btn danger hidden" type="button" id="support-delete-all">حذف كل الرسائل</button>
           </div>
           <div class="support-list" id="support-list"></div>
           <p class="empty hidden" id="support-empty"></p>
@@ -489,7 +483,7 @@
       submit.disabled = true;
       try {
         const result = await api("/api/auth/login", jsonPost({
-          identifier: $("login-email").value.trim(),
+          email: $("login-email").value,
           password: $("login-password").value,
           remember: $("login-remember").checked,
         }));
@@ -562,57 +556,6 @@
       $("chart-end").textContent = "اليوم";
     }
 
-    /* ---------- نسب الصفوف ---------- */
-    const GRADE_COLORS = { "8": "#65d6c4", "9": "#6fb1ff", "10": "#b08cff", "11": "#ffc46b", "12": "#ff8f8f" };
-
-    function renderGrades(stats) {
-      const list = $("grade-list");
-      const stack = $("grade-stack");
-      list.replaceChildren();
-      stack.replaceChildren();
-      const hasData = Boolean(stats && stats.total);
-      $("grade-empty").classList.toggle("hidden", hasData);
-      $("grade-total").textContent = hasData ? `${fmt(stats.total)} طالب مصنّف` : "";
-      stack.classList.toggle("hidden", !hasData);
-      list.classList.toggle("hidden", !hasData);
-      const note = $("grade-note");
-      note.classList.toggle("hidden", !(stats && stats.unspecified));
-      if (stats && stats.unspecified) note.textContent = `${fmt(stats.unspecified)} طالب لم يحدّد صفه بعد، ولا يدخلون في النسب.`;
-      if (!hasData) return;
-
-      const fills = [];
-      const segments = [];
-      for (const grade of stats.grades) {
-        const row = el("li", grade.count ? "grade-row" : "grade-row is-zero");
-        row.style.setProperty("--seg", GRADE_COLORS[grade.key]);
-        row.append(el("span", "grade-name", grade.label));
-        const track = el("div", "grade-track");
-        track.setAttribute("role", "presentation");
-        const fill = el("i", "grade-fill");
-        track.append(fill);
-        row.append(track);
-        const value = el("div", "grade-value");
-        value.append(el("strong", "", `${grade.percent.toLocaleString("ar")}%`), el("span", "", `${fmt(grade.count)} طالب`));
-        value.title = `${grade.exact.toLocaleString("ar")}%`;
-        row.append(value);
-        list.append(row);
-        fills.push([fill, grade.percent]);
-
-        if (grade.count) {
-          const segment = el("i");
-          segment.style.setProperty("--seg", GRADE_COLORS[grade.key]);
-          segment.title = `${grade.label}: ${grade.percent.toLocaleString("ar")}%`;
-          stack.append(segment);
-          segments.push([segment, grade.percent]);
-        }
-      }
-      // الحركة: نبدأ من الصفر ثم نملأ الأشرطة بعد الرسم الأول
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        for (const [fill, percent] of fills) fill.style.width = `${percent}%`;
-        for (const [segment, percent] of segments) segment.style.width = `${percent}%`;
-      }));
-    }
-
     /* ---------- accounts ---------- */
     async function loadDashboard() {
       try {
@@ -626,7 +569,6 @@
         $("count-users").textContent = fmt(users);
         $("count-admins").textContent = fmt(admins);
         renderChart(allUsers);
-        renderGrades(result.gradeStats);
         renderAccounts();
       } catch (error) { handleError(error); }
     }
@@ -638,8 +580,7 @@
       const query = $("user-search").value.trim().toLocaleLowerCase();
       const inCategory = allUsers.filter((u) => Boolean(u.is_admin) === isAdminTab);
       const visible = inCategory.filter((u) =>
-        !query || u.email.toLocaleLowerCase().includes(query) || (u.name || "").toLocaleLowerCase().includes(query)
-          || (u.grade_label || "").toLocaleLowerCase().includes(query));
+        !query || u.email.toLocaleLowerCase().includes(query) || (u.name || "").toLocaleLowerCase().includes(query));
 
       for (const user of visible) body.append(accountRow(user));
 
@@ -660,10 +601,7 @@
 
       const row = el("tr");
       const name = el("td", "", user.name); name.dataset.label = "الاسم";
-      const email = user.is_student
-        ? el("td", "", user.grade_label ? `الصف ${user.grade_label}` : "حساب طالب")
-        : el("td", "email", user.email);
-      email.dataset.label = user.is_student ? "الصف" : "البريد";
+      const email = el("td", "email", user.email); email.dataset.label = "البريد";
       const created = el("td", "", fmtDate(user.created_at)); created.dataset.label = "التسجيل";
       const actionsCell = el("td", "actions-cell");
       const actions = el("div", "actions");
@@ -674,7 +612,7 @@
       if (!isSelf && !isPrimary) {
         const toggle = el("button", "btn small teal", isAdmin ? "إزالة الأدمن" : "جعله أدمن");
         toggle.type = "button";
-        toggle.setAttribute("aria-label", isAdmin ? `إزالة صلاحية الأدمن من ${user.is_student ? user.name : user.email}` : `جعل ${user.is_student ? user.name : user.email} أدمن`);
+        toggle.setAttribute("aria-label", isAdmin ? `إزالة صلاحية الأدمن من ${user.email}` : `جعل ${user.email} أدمن`);
         toggle.addEventListener("click", async () => {
           toggle.disabled = true;
           try {
@@ -689,7 +627,7 @@
       if (canManage) {
         const pw = el("button", "btn small teal", "تغيير كلمة المرور");
         pw.type = "button";
-        pw.setAttribute("aria-label", `تغيير كلمة مرور ${user.is_student ? user.name : user.email}`);
+        pw.setAttribute("aria-label", `تغيير كلمة مرور ${user.email}`);
         pw.addEventListener("click", () => openPasswordDialog(user));
         actions.append(pw);
       }
@@ -697,9 +635,9 @@
       if (canManage && !isPrimary) {
         const del = el("button", "btn small danger", "حذف");
         del.type = "button";
-        del.setAttribute("aria-label", `حذف حساب ${user.is_student ? user.name : user.email}`);
+        del.setAttribute("aria-label", `حذف حساب ${user.email}`);
         del.addEventListener("click", async () => {
-          const ok = await confirmAction(`سيتم حذف حساب ${user.is_student ? user.name : user.email} وكل محادثاته نهائيًا. لا يمكن التراجع عن ذلك.`, "حذف الحساب");
+          const ok = await confirmAction(`سيتم حذف حساب ${user.email} وكل محادثاته نهائيًا. لا يمكن التراجع عن ذلك.`, "حذف الحساب");
           if (!ok) return;
           del.disabled = true;
           try {
@@ -723,7 +661,7 @@
       passwordTargetId = user.id;
       $("password-form").reset();
       $("pw-error").textContent = "";
-      $("pw-desc").textContent = `عيّن كلمة مرور جديدة للحساب ${user.is_student ? user.name : user.email}. سيتم تسجيل خروجه من كل أجهزته.`;
+      $("pw-desc").textContent = `عيّن كلمة مرور جديدة للحساب ${user.email}. سيتم تسجيل خروجه من كل أجهزته.`;
       document.querySelectorAll(".pw-toggle").forEach((b) => { b.textContent = "إظهار"; b.setAttribute("aria-pressed", "false"); });
       $("pw-new").type = "password"; $("pw-confirm").type = "password";
       $("password-dialog").showModal();
@@ -777,23 +715,9 @@
         badge.classList.toggle("new", newCount > 0);
         $("stat-support-new").textContent = fmt(newCount);
         $("stat-new-card").classList.toggle("alert", newCount > 0);
-        $("support-delete-all").classList.toggle("hidden", supportMessages.length === 0);
         renderSupport();
       } catch (error) { handleError(error); }
     }
-
-    $("support-delete-all").addEventListener("click", async () => {
-      const ok = await confirmAction(`سيتم حذف جميع رسائل مركز المساعدة (${fmt(supportMessages.length)}) نهائيًا. لا يمكن التراجع عن ذلك.`, "حذف كل الرسائل");
-      if (!ok) return;
-      const button = $("support-delete-all");
-      button.disabled = true;
-      try {
-        await api("/api/admin/support-messages", { method: "DELETE" });
-        toast("تم حذف جميع الرسائل.");
-        await loadSupport();
-      } catch (error) { handleError(error); }
-      finally { button.disabled = false; }
-    });
 
     function renderSupport() {
       const list = $("support-list");
