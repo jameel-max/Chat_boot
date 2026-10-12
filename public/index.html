@@ -144,46 +144,7 @@
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
       </section>
     </main>
-    <section class="auth-overlay" id="auth-overlay" data-boot aria-labelledby="auth-title">
-      <div class="auth-card">
-        <img class="welcome-logo" src="/school-logo.png" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
-        <h1 id="auth-title">أهلًا بك في فهيم</h1>
-        <p id="auth-description">سجّل الدخول بحسابك للوصول إلى محادثاتك المحفوظة.</p>
-        <form class="auth-form" id="auth-form" novalidate>
-          <label for="auth-email" id="auth-name-label">الاسم الرباعي</label>
-          <input id="auth-email" type="text" autocomplete="username" required maxlength="80" placeholder="مثال: محمد أحمد علي الحسن">
-          <p class="auth-hint register-only hidden" id="auth-name-hint" aria-live="polite">اكتب اسمك، واسم أبيك، واسم جدك، واسم العائلة.</p>
-          <fieldset class="grade-field register-only hidden" id="auth-grade-field">
-            <legend>الصف الدراسي</legend>
-            <div class="grade-chips" role="radiogroup" aria-label="الصف الدراسي">
-              <label class="grade-option"><input type="radio" name="grade" value="8"><span>الثامن</span></label>
-              <label class="grade-option"><input type="radio" name="grade" value="9"><span>التاسع</span></label>
-              <label class="grade-option"><input type="radio" name="grade" value="10"><span>العاشر</span></label>
-              <label class="grade-option"><input type="radio" name="grade" value="11"><span>الأول الثانوي</span></label>
-              <label class="grade-option"><input type="radio" name="grade" value="12"><span>الثاني الثانوي</span></label>
-            </div>
-          </fieldset>
-          <label for="auth-password">كلمة المرور</label>
-          <div class="password-field">
-            <input id="auth-password" type="password" autocomplete="current-password" required maxlength="128" placeholder="أدخل كلمة المرور">
-            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
-          </div>
-          <p class="auth-hint register-only hidden" id="auth-password-hint">10 أحرف على الأقل. احفظها جيدًا لأنك ستدخل بها في كل مرة.</p>
-          <div class="register-only hidden" id="auth-confirm-group">
-            <label for="auth-password-confirm">تأكيد كلمة المرور</label>
-            <div class="password-field">
-              <input id="auth-password-confirm" type="password" autocomplete="new-password" maxlength="128" placeholder="أعد كتابة كلمة المرور">
-              <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
-            </div>
-          </div>
-          <label class="remember-option"><input id="remember-device" type="checkbox" checked>  تذكرني  </label>
-          <button class="auth-submit" id="auth-submit" type="submit">تسجيل الدخول</button>
-        </form>
-        <button class="auth-mode-toggle forgot-link" id="forgot-password-link" type="button">نسيت كلمة المرور؟</button>
-        <button class="auth-mode-toggle" id="auth-mode-toggle" type="button">ليس لديك حساب؟ أنشئ حسابًا</button>
-        <p class="auth-error" id="auth-error" role="alert"></p>
-      </div>
-    </section>
+    
     <section class="auth-overlay account-overlay hidden" id="password-overlay" aria-labelledby="password-title">
       <div class="auth-card">
         <img class="welcome-logo" src="/school-logo.png" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
