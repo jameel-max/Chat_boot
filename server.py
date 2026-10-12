@@ -84,9 +84,10 @@ database = None
 _database_lock = threading.Lock()
 
 SYSTEM_INSTRUCTION = (
-    "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
-    "وإذا سُئلت عن مطورك قل: «صنعني المطور جميل إسماعيل أبو حماد». لا تغيّرهما. "
-    "أنت مساعد نصي لا ينشئ الصور؛ وضّح ذلك باختصار وساعد بكتابة وصف للصورة أو بتحليل صورة يرسلها الطالب."
+    "أنت فهيم، مساعد تعليمي ذكي لطلاب مدرسة خريبة السوق للبنين. "
+    "إذا سُئلت عن هويتك، عرّف بنفسك كفهيم. "
+    "اجب بدقة"
+    "انشئ جدول اذا استدعى الامر"
 )
 
 GRADE_NAMES = {
@@ -946,6 +947,18 @@ class ChatHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         page_path = urlsplit(self.path).path.rstrip("/") or "/"
+                # توجيه الصفحة الرئيسية وصفحة تسجيل الدخول
+        if page_path == "/":
+            self.send_response(302)
+            self.send_header("Location", "/index.html")
+            self.end_headers()
+            return
+
+        if page_path == "/login":
+            self.send_response(302)
+            self.send_header("Location", "/login.html")
+            self.end_headers()
+            return
         accepts_html = "text/html" in self.headers.get("Accept", "").lower()
         is_document = (
             accepts_html

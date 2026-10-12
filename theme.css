@@ -1,0 +1,38 @@
+/*
+ * المظهر الفاتح (الافتراضي) والداكن.
+ * الداكن = تصميم الموقع الحالي بلا تغيير. الفاتح = قلب ألوان الصفحة كاملة (حل مؤقت يعمل دون تعديل style.css).
+ * لبناء مظهر فاتح أصلي بألوان مضبوطة أرسل style.css وسأستبدل هذا الملف به.
+ */
+html { transition: filter .2s ease; }
+
+html[data-theme="dark"] { color-scheme: dark; }
+
+html[data-theme="light"] {
+  /* dark هنا ثم يُقلب الفلتر الألوان، فتظهر عناصر النماذج والتمرير بشكل فاتح */
+  color-scheme: dark;
+  background: #000; /* يصير أبيض نقيًا بعد القلب */
+  filter: invert(1) hue-rotate(180deg);
+}
+html[data-theme="light"] body,
+html[data-theme="light"] .app-shell,
+html[data-theme="light"] .chat-panel,
+html[data-theme="light"] .conversation {
+  background: #000;
+}
+
+/* الصور الحقيقية والشعار لا تُقلب ألوانها.
+   تُستثنى الصور داخل [data-photo-bg]: ذلك العنصر كله أُعيد قلبه فصارت ألوانه أصلية،
+   وقلب الشعار مرة ثانية داخله يجعله سالبًا (أبيض). */
+html[data-theme="light"] :is(.brand-logo, .mini-logo, .welcome-logo, .user-avatar, .sidebar-avatar, .message-avatar img, #preview-image, .message-image):not([data-photo-bg] *) {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* العنصر الذي يحمل صورة images.jpg (يعلّمه app.js) يبقى بمظهره الأصلي: الصورة بتظليلها الأسود */
+html[data-theme="light"] [data-photo-bg] {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* شاشة التحميل تُرسم بألوانها المكتوبة في extras.css (نلغي قلب الصفحة عنها) */
+html[data-theme="light"] .app-loader {
+  filter: invert(1) hue-rotate(180deg);
+}
