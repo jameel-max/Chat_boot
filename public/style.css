@@ -1,3 +1,8 @@
+::selection {
+  background-color: #43b9a7;
+}
+
+
 :root {
   color-scheme: dark;
   --bg: #0d1416;

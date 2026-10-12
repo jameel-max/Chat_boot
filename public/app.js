@@ -2511,7 +2511,11 @@ authForm.addEventListener("submit", async (event) => {
     setAuthMode("login");
     await loadHistory();
   } catch (error) {
-    authError.textContent = error.message;
+    // هذه الرسالة لا يرسلها إلا server.py القديم (يطلب البريد بدل الاسم الرباعي)
+    authError.textContent =
+      error.message === "أدخل البريد الإلكتروني وكلمة المرور."
+        ? "الخادم يعمل بنسخة قديمة من server.py. استبدله بالنسخة الجديدة ثم أعد تشغيل الخادم."
+        : error.message;
   } finally {
     authSubmit.disabled = false;
   }
