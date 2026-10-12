@@ -59,6 +59,7 @@ const adminUsersView = document.querySelector("#admin-users-view");
 const adminSupportView = document.querySelector("#admin-support-view");
 const adminSupportMessages = document.querySelector("#admin-support-messages");
 const adminSupportEmpty = document.querySelector("#admin-support-empty");
+const adminSupportDeleteAll = document.querySelector("#admin-support-delete-all");
 const adminPasswordDialog = document.querySelector("#admin-password-dialog");
 const adminPasswordDescription = document.querySelector("#admin-password-description");
 const adminPasswordForm = document.querySelector("#admin-password-form");
@@ -82,6 +83,13 @@ const authDescription = document.querySelector("#auth-description");
 const authSubmit = document.querySelector("#auth-submit");
 const authModeToggle = document.querySelector("#auth-mode-toggle");
 const rememberDevice = document.querySelector("#remember-device");
+const authTitle = document.querySelector("#auth-title");
+const authNameLabel = document.querySelector("#auth-name-label");
+const authNameHint = document.querySelector("#auth-name-hint");
+const authGradeField = document.querySelector("#auth-grade-field");
+const authPasswordConfirm = document.querySelector("#auth-password-confirm");
+const authConfirmGroup = document.querySelector("#auth-confirm-group");
+const authPasswordHint = document.querySelector("#auth-password-hint");
 
 /* ============================================================
  * دعم الرياضيات (LaTeX) عبر KaTeX
@@ -280,10 +288,29 @@ async function loadAdminSupportMessages() {
     document.querySelector("#admin-support-tab").textContent =
       newCount ? `رسائل المساعدة (${newCount.toLocaleString("ar")})` : "رسائل المساعدة";
     adminSupportEmpty.classList.toggle("hidden", result.messages.length > 0);
+    adminSupportDeleteAll.classList.toggle("hidden", result.messages.length === 0);
+    adminSupportDeleteAll.dataset.count = String(result.messages.length);
   } catch (error) {
     adminError.textContent = error.message;
   }
 }
+
+adminSupportDeleteAll.addEventListener("click", async () => {
+  const count = Number(adminSupportDeleteAll.dataset.count || 0);
+  if (!window.confirm(`سيتم حذف جميع رسائل مركز المساعدة (${count.toLocaleString("ar")}) نهائيًا. هل أنت متأكد؟`)) {
+    return;
+  }
+  adminSupportDeleteAll.disabled = true;
+  adminError.textContent = "";
+  try {
+    await apiRequest("/api/admin/support-messages", { method: "DELETE" });
+    await loadAdminSupportMessages();
+  } catch (error) {
+    adminError.textContent = error.message;
+  } finally {
+    adminSupportDeleteAll.disabled = false;
+  }
+});
 
 function filterAdminList(list, search, emptyMessage, noResultsMessage) {
   const activeTab = adminTabs.find((tab) => tab.getAttribute("aria-selected") === "true")
@@ -333,6 +360,113 @@ function scrollToLatest() {
   conversation.scrollTop = conversation.scrollHeight;
 }
 
+const COPY_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
+const CHECK_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // ننتقل إلى الطريقة البديلة
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.cssText = "position:fixed;top:0;left:-9999px;opacity:0";
+  document.body.append(area);
+  area.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+  area.remove();
+  return copied;
+}
+
+function createCopyButton(className, label, getText) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.title = label;
+
+  const icon = document.createElement("span");
+  icon.className = "copy-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = COPY_ICON;
+
+  const text = document.createElement("span");
+  text.className = "copy-label";
+  text.setAttribute("aria-live", "polite");
+  text.textContent = label;
+
+  button.append(icon, text);
+
+  let timer = 0;
+  button.addEventListener("click", async () => {
+    const copied = await copyToClipboard(getText());
+    window.clearTimeout(timer);
+    icon.innerHTML = copied ? CHECK_ICON : COPY_ICON;
+    text.textContent = copied ? "تم النسخ" : "تعذّر النسخ";
+    button.classList.toggle("copied", copied);
+    if (!copied) showToast("تعذّر النسخ، انسخ النص يدويًا.");
+    timer = window.setTimeout(() => {
+      icon.innerHTML = COPY_ICON;
+      text.textContent = label;
+      button.classList.remove("copied");
+    }, 1800);
+  });
+  return button;
+}
+
+// زر "نسخ الرد" تحت كل رد من فهيم (يُنسخ نص الرد الأصلي بما فيه الأكواد والمعادلات)
+const RESEND_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>';
+
+// زر "إعادة الإرسال" تحت رسالة الطالب: يعيد إرسال النص مع الصورة أو الملف المرفقين
+function addResendAction(body, payload, messageElement) {
+  if (!payload || body.querySelector(".message-actions")) return;
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "resend-button";
+  button.title = "إعادة إرسال الرسالة";
+  button.disabled = isSending;
+  const icon = document.createElement("span");
+  icon.className = "copy-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = RESEND_ICON;
+  const label = document.createElement("span");
+  label.textContent = "إعادة الإرسال";
+  button.append(icon, label);
+  button.addEventListener("click", () => {
+    if (isSending) return;
+    // إن لم يصل رد لهذه الرسالة (فشل أو إيقاف) نستبدلها بدل تكرارها
+    const unanswered = messageElement && conversation.lastElementChild === messageElement;
+    if (unanswered) messageElement.remove();
+    deliverMessage(payload).catch((error) => {
+      showToast(error instanceof Error ? error.message : "تعذّرت إعادة الإرسال.");
+    });
+  });
+  actions.append(button);
+  body.append(actions);
+}
+
+function addReplyActions(body, text) {
+  if (!text || body.querySelector(".message-actions")) return;
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  actions.append(createCopyButton("copy-button", "نسخ الرد", () => text));
+  body.append(actions);
+}
+
 function appendMessage(role, text, imageUrl = null) {
   welcome.classList.add("hidden");
   const message = document.createElement("article");
@@ -361,17 +495,47 @@ function appendMessage(role, text, imageUrl = null) {
     content.className = "message-text";
     renderMarkdown(content, text);
     body.append(content);
+    if (role === "assistant") addReplyActions(body, text);
   }
   message.append(avatar, body);
   conversation.append(message);
   scrollToLatest();
+  body.messageElement = message;
   return body;
 }
 
+// أثناء الإرسال يتحول زر الإرسال إلى زر إيقاف (لا يُعطَّل)
+let isSending = false;
+let activeRequest = null;
+
 function setBusy(busy) {
-  sendButton.disabled = busy;
+  isSending = busy;
   input.disabled = busy;
+  sendButton.classList.toggle("is-stop", busy);
+  sendButton.setAttribute("aria-label", busy ? "إيقاف الرد" : "إرسال الرسالة");
+  sendButton.title = busy ? "إيقاف الرد" : "إرسال";
   sendButton.setAttribute("aria-busy", String(busy));
+  document.querySelectorAll(".resend-button").forEach((button) => {
+    button.disabled = busy;
+  });
+}
+
+function stopGeneration() {
+  if (!activeRequest || activeRequest.stopped) return;
+  activeRequest.stopped = true;
+  activeRequest.controller.abort();
+}
+
+// تركيز مربع الكتابة تلقائيًا على الحاسوب فقط، حتى لا تظهر لوحة المفاتيح فجأة على الهاتف
+const touchDevice = window.matchMedia("(pointer: coarse)");
+function focusInputAuto() {
+  if (touchDevice.matches || input.disabled) return;
+  if (!authOverlay.classList.contains("hidden")) return;
+  const blocked = document.querySelector(
+    ".auth-overlay:not(.hidden):not(#auth-overlay)",
+  );
+  if (blocked) return;
+  input.focus({ preventScroll: true });
 }
 
 function parseMarkdownTableRow(line) {
@@ -458,7 +622,11 @@ function renderMarkdown(element, text) {
 
     const header = document.createElement("div");
     header.className = "code-header";
-    header.textContent = codeLanguage || "code";
+    const language = document.createElement("span");
+    language.className = "code-language";
+    language.textContent = codeLanguage || "code";
+    const source = codeLines.join("\n");
+    header.append(language, createCopyButton("code-copy", "نسخ", () => source));
 
     const pre = document.createElement("pre");
     pre.dir = "ltr";
@@ -782,7 +950,7 @@ function highlightCodeLine(lineElement, text) {
   }
 }
 
-async function readGeminiStream(response, assistantBody, name, answer) {
+async function readGeminiStream(response, assistantBody, name, answer, state = {}) {
   if (!response.body) throw new Error("المتصفح لا يدعم استقبال البث.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -868,6 +1036,7 @@ async function readGeminiStream(response, assistantBody, name, answer) {
         answerVisible = true;
       }
       answerText += eventData.text;
+      state.answerText = answerText;
       schedulePaint();
     } else if (eventName === "conversation") {
       if (
@@ -1103,6 +1272,12 @@ function setAuthenticated(user, isAdmin = false, isPrimaryAdmin = false) {
     userAvatarFallback.classList.remove("hidden");
   }
   authOverlay.classList.add("hidden");
+  try {
+    localStorage.setItem(LOGGED_IN_BEFORE_KEY, "1");
+  } catch {
+    // التخزين غير متاح
+  }
+  afterAuthenticated();
 }
 
 async function loadAdminDashboard() {
@@ -1284,6 +1459,7 @@ function renderHistory(conversations) {
   for (const record of conversations) {
     const entry = document.createElement("div");
     entry.className = "history-entry";
+    entry.dataset.id = record.id;
     if (record.id === currentConversationId) entry.classList.add("active");
 
     const title = document.createElement("button");
@@ -1345,31 +1521,140 @@ function filterHistory() {
 
 async function loadHistory() {
   const result = await apiRequest("/api/conversations");
-  renderHistory(result.conversations);
+  renderHistory(result.conversations.filter((item) => !pendingDeletes.has(item.id)));
+}
+
+const CONVERSATION_LOADER_DELAY_MS = 120;
+let conversationLoadToken = 0;
+let loadingConversationId = null;
+
+function markActiveHistoryEntry(id) {
+  for (const entry of historyList.querySelectorAll(".history-entry")) {
+    entry.classList.toggle("active", entry.dataset.id === id);
+  }
+}
+
+function createConversationLoader() {
+  const loader = document.createElement("div");
+  loader.className = "convo-loader";
+  loader.setAttribute("role", "status");
+  loader.setAttribute("aria-live", "polite");
+
+  const stage = document.createElement("div");
+  stage.className = "convo-loader__stage";
+  const glow = document.createElement("div");
+  glow.className = "convo-loader__glow";
+
+  const picture = document.createElement("picture");
+  const source = document.createElement("source");
+  source.srcset = "/loader-robot.webp";
+  source.type = "image/webp";
+  const robot = document.createElement("img");
+  robot.className = "convo-loader__robot";
+  robot.src = "/loader-robot.png";
+  robot.alt = "";
+  robot.width = 420;
+  robot.height = 510;
+  robot.decoding = "async";
+  robot.draggable = false;
+  picture.append(source, robot);
+
+  const shadow = document.createElement("div");
+  shadow.className = "convo-loader__shadow";
+  stage.append(glow, picture, shadow);
+
+  const text = document.createElement("p");
+  text.className = "convo-loader__text";
+  text.textContent = "جارٍ فتح المحادثة";
+  const dots = document.createElement("span");
+  dots.className = "loader-dots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 3; index += 1) {
+    dots.append(document.createElement("i"));
+  }
+  text.append(dots);
+
+  loader.append(stage, text);
+  return loader;
 }
 
 async function loadConversation(id) {
-  if (sendButton.disabled) return;
-  const result = await apiRequest(`/api/conversations/${encodeURIComponent(id)}`);
+  if (isSending) {
+    showToast("انتظر حتى ينتهي فهيم من الرد ثم افتح المحادثة.");
+    return;
+  }
+  // ضغط متكرر على نفس المحادثة أثناء فتحها: نتجاهله بدل إرسال طلبات مكررة
+  if (loadingConversationId === id) return;
+
+  const token = ++conversationLoadToken;
+  loadingConversationId = id;
+  markActiveHistoryEntry(id);
+  setMobileMenuOpen(false);
+
+  // إن تأخر الفتح نعرض الروبوت فورًا ليعرف الطالب أن المحادثة تُحمَّل
+  let loaderShown = false;
+  const loaderTimer = window.setTimeout(() => {
+    if (token !== conversationLoadToken) return;
+    loaderShown = true;
+    welcome.classList.add("hidden");
+    conversation.replaceChildren(createConversationLoader());
+    conversation.setAttribute("aria-busy", "true");
+  }, CONVERSATION_LOADER_DELAY_MS);
+
+  let result;
+  try {
+    result = await apiRequest(`/api/conversations/${encodeURIComponent(id)}`);
+  } catch (error) {
+    if (token === conversationLoadToken) {
+      if (loaderShown) {
+        conversation.replaceChildren(welcome);
+        welcome.classList.remove("hidden");
+        currentConversationId = null;
+      }
+      markActiveHistoryEntry(currentConversationId);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(loaderTimer);
+    if (token === conversationLoadToken) {
+      loadingConversationId = null;
+      conversation.removeAttribute("aria-busy");
+    }
+  }
+
+  // اختار الطالب محادثة أخرى (أو بدأ محادثة جديدة) أثناء التحميل
+  if (token !== conversationLoadToken) return;
+
   currentConversationId = result.conversation.id;
   conversation.replaceChildren();
   welcome.classList.add("hidden");
-  setMobileMenuOpen(false);
 
   for (const message of result.messages) {
     const imageUrl = message.image
       ? `data:${message.image.mimeType};base64,${message.image.data}`
       : null;
-    const body = appendMessage(
-      message.role,
-      message.content,
-      imageUrl,
-    );
+    const body = appendMessage(message.role, message.content, imageUrl);
+    if (message.role === "user" && !/مرفق ملف:/.test(message.content || "")) {
+      addResendAction(
+        body,
+        {
+          text: message.content || "",
+          image: message.image
+            ? { mimeType: message.image.mimeType, data: message.image.data }
+            : null,
+          file: null,
+          displayedImage: imageUrl,
+          displayedFileName: null,
+        },
+        body.messageElement,
+      );
+    }
   }
   if (!result.messages.length) {
     welcome.classList.remove("hidden");
     conversation.append(welcome);
   }
+  focusInputAuto();
   await loadHistory();
 }
 
@@ -1388,34 +1673,184 @@ async function renameConversation(record) {
   }
 }
 
-async function deleteConversation(record) {
-  if (!window.confirm(`هل تريد حذف محادثة «${record.title}» نهائيًا؟`)) return;
-  try {
-    await apiRequest(`/api/conversations/${encodeURIComponent(record.id)}`, {
-      method: "DELETE",
+// محادثات تُحذف في الخلفية: نخفيها من القائمة فورًا حتى لو أعاد الخادم نسخة قديمة منها
+const pendingDeletes = new Set();
+
+function sendConversationDelete(id, attempt = 0) {
+  fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    cache: "no-store",
+    keepalive: true, // يكتمل الطلب حتى لو أُغلقت الصفحة
+  })
+    .then((response) => {
+      if (response.ok || response.status === 404) {
+        pendingDeletes.delete(id);
+        return;
+      }
+      throw new Error(`HTTP ${response.status}`);
+    })
+    .catch(() => {
+      if (attempt < 2) {
+        window.setTimeout(() => sendConversationDelete(id, attempt + 1), 1500 * (attempt + 1));
+        return;
+      }
+      pendingDeletes.delete(id);
+      showToast("تعذّر إكمال حذف المحادثة، ستعود إلى القائمة.");
+      loadHistory().catch(() => {});
     });
-    if (currentConversationId === record.id) resetChat();
-    await loadHistory();
-  } catch (error) {
-    showToast(error.message);
+}
+
+function deleteConversation(record) {
+  if (!window.confirm(`هل تريد حذف محادثة «${record.title}» نهائيًا؟`)) return;
+  const isActive = currentConversationId === record.id || loadingConversationId === record.id;
+  if (isActive && isSending) {
+    showToast("انتظر حتى ينتهي فهيم من الرد ثم احذف المحادثة.");
+    return;
   }
+
+  pendingDeletes.add(record.id);
+
+  // 1) إزالة فورية من قائمة المحادثات
+  for (const entry of historyList.querySelectorAll(".history-entry")) {
+    if (entry.dataset.id === record.id) entry.remove();
+  }
+  if (!historyList.querySelector(".history-entry")) renderHistory([]);
+
+  // 2) العودة فورًا إلى الواجهة الرئيسية (شعار المدرسة والاختصارات)
+  if (isActive) resetChat();
+
+  // 3) الحذف الفعلي من قاعدة البيانات في الخلفية دون انتظار
+  sendConversationDelete(record.id);
+}
+
+// ===== الاسم الرباعي: نفس قواعد الخادم (يُدمج عبد الله / أبو حماد / بن علي كاسم واحد) =====
+const NAME_PREFIXES = new Set(["عبد", "ابو", "ابن", "بن", "ام", "ال", "بنت"]);
+const PASSWORD_MIN_LENGTH = 10;
+const NAME_HINT_DEFAULT = "اكتب اسمك، واسم أبيك، واسم جدك، واسم العائلة.";
+
+function normalizeArabic(text) {
+  return text
+    .replace(/[\u064b-\u065f\u0670\u0640]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function countNameTokens(text) {
+  const words = normalizeArabic(text).split(" ").filter(Boolean);
+  let count = 0;
+  for (let index = 0; index < words.length; index += 1) {
+    if (NAME_PREFIXES.has(words[index]) && index + 1 < words.length) index += 1;
+    count += 1;
+  }
+  return count;
+}
+
+// يعيد رسالة الخطأ أو نصًا فارغًا إذا كان الاسم رباعيًا صحيحًا
+function validateFullNameClient(text) {
+  const normalized = normalizeArabic(text);
+  if (!normalized) return "اكتب اسمك الرباعي.";
+  if (!/^[\u0621-\u064a ]+$/.test(normalized)) {
+    return "اكتب الاسم بالأحرف العربية فقط، دون أرقام أو رموز.";
+  }
+  const count = countNameTokens(text);
+  if (count !== 4) {
+    return `اكتب اسمك الرباعي كاملًا: اسمك، اسم أبيك، اسم جدك، اسم العائلة. عدد الأسماء التي كتبتها: ${count.toLocaleString("ar")}.`;
+  }
+  return "";
+}
+
+function updateNameHint() {
+  if (authMode !== "register") return;
+  const text = authEmail.value;
+  let message = NAME_HINT_DEFAULT;
+  let state = "";
+  if (normalizeArabic(text)) {
+    const error = validateFullNameClient(text);
+    const count = countNameTokens(text);
+    if (!error) {
+      message = "✓ اسم رباعي صحيح";
+      state = "ok";
+    } else if (!/^[\u0621-\u064a ]+$/.test(normalizeArabic(text))) {
+      message = "اكتب الاسم بالأحرف العربية فقط.";
+      state = "warn";
+    } else if (count > 4) {
+      message = "الاسم أكثر من أربعة أسماء. اكتب الأسماء الأربعة فقط.";
+      state = "warn";
+    } else {
+      message = `الأسماء المكتوبة: ${count.toLocaleString("ar")} من ٤`;
+    }
+  }
+  authNameHint.textContent = message;
+  authNameHint.classList.toggle("ok", state === "ok");
+  authNameHint.classList.toggle("warn", state === "warn");
 }
 
 function setAuthMode(mode) {
   authMode = mode;
   const isRegistering = mode === "register";
+  authTitle.textContent = isRegistering ? "أنشئ حسابك في فهيم" : "أهلًا بك في فهيم";
   authDescription.textContent = isRegistering
-    ? "أنشئ حسابًا بالبريد وكلمة المرور لحفظ محادثاتك."
-    : "سجّل الدخول بحسابك للوصول إلى محادثاتك المحفوظة.";
+    ? "اكتب اسمك الرباعي، واختر صفك، وأنشئ كلمة مرور لتبدأ."
+    : "سجّل الدخول باسمك الرباعي وكلمة المرور للوصول إلى محادثاتك.";
   authSubmit.textContent = isRegistering ? "إنشاء حساب" : "تسجيل الدخول";
   authModeToggle.textContent = isRegistering
     ? "لديك حساب؟ سجّل الدخول"
     : "ليس لديك حساب؟ أنشئ حسابًا";
   forgotPasswordLink.classList.toggle("hidden", isRegistering);
+  document
+    .querySelectorAll(".register-only")
+    .forEach((node) => node.classList.toggle("hidden", !isRegistering));
+  authNameLabel.textContent = isRegistering
+    ? "الاسم الرباعي"
+    : "الاسم الرباعي (أو البريد الإلكتروني للأدمن)";
+  authEmail.autocomplete = isRegistering ? "name" : "username";
+  authEmail.placeholder = isRegistering ? "مثال: محمد أحمد علي الحسن" : "اسمك الرباعي";
   authPassword.autocomplete = isRegistering ? "new-password" : "current-password";
-  authPassword.minLength = isRegistering ? 10 : 1;
+  authPassword.placeholder = isRegistering ? "أنشئ كلمة مرور" : "أدخل كلمة المرور";
+  authPassword.minLength = isRegistering ? PASSWORD_MIN_LENGTH : 1;
+  authPasswordConfirm.required = isRegistering;
+  authForm.querySelectorAll('input[name="grade"]').forEach((radio) => {
+    radio.required = isRegistering;
+  });
   authError.textContent = "";
+  updateNameHint();
 }
+
+// ===== شاشة التحميل: تظهر أثناء التحقق من الجلسة بدل وميض نافذة تسجيل الدخول =====
+const appLoader = document.querySelector("#app-loader");
+const LOADER_MIN_MS = 700;
+const LOADER_MAX_MS = 12000;
+const LOGGED_IN_BEFORE_KEY = "faheem_logged_in_before";
+const loaderStartedAt = performance.now();
+
+function hideAppLoader() {
+  authOverlay.removeAttribute("data-boot");
+  if (!appLoader || appLoader.dataset.done) return;
+  appLoader.dataset.done = "1";
+  if (document.documentElement.classList.contains("no-loader")) {
+    appLoader.remove();
+    return;
+  }
+  const wait = Math.max(0, LOADER_MIN_MS - (performance.now() - loaderStartedAt));
+  window.setTimeout(() => {
+    appLoader.classList.add("is-hidden");
+    const remove = () => appLoader.remove();
+    appLoader.addEventListener("transitionend", remove, { once: true });
+    window.setTimeout(remove, 900);
+  }, wait);
+}
+
+// إن تعذّر الخادم طويلًا لا نترك الشاشة عالقة: نعرض تسجيل الدخول
+window.setTimeout(() => {
+  if (appLoader && !appLoader.dataset.done) {
+    showAuthOverlay("");
+    hideAppLoader();
+  }
+}, LOADER_MAX_MS);
 
 async function initializeApp() {
   try {
@@ -1424,13 +1859,205 @@ async function initializeApp() {
     await loadHistory();
   } catch (error) {
     showAuthOverlay("");
+  } finally {
+    hideAppLoader();
   }
+}
+
+const ACTIVITY_CREATE_PATTERN =
+  /(اكتب|اكتبي|أنشئ|انشئ|ألّف|ألف|صمّم|صمم|ولّد|ولد|لخّص|لخص|تلخيص|مقال|موضوع تعبير|قصيدة|قصة|رسالة|برنامج|كود|خطة|جدول|اختبار|أسئلة)/;
+
+// يحدد حالة فهيم من طلب الطالب: تحليل مرفق، إنشاء محتوى، أو تفكير عادي
+function detectActivity(text, hasImage, hasFile) {
+  if (hasImage) {
+    return {
+      state: "analyzing",
+      labels: ["فهيم يحلّل الصورة", "يقرأ التفاصيل", "يربطها بسؤالك"],
+    };
+  }
+  if (hasFile) {
+    return {
+      state: "analyzing",
+      labels: ["فهيم يقرأ الملف", "يحلّل محتواه", "يستخرج المهم"],
+    };
+  }
+  if (ACTIVITY_CREATE_PATTERN.test(text)) {
+    return {
+      state: "creating",
+      labels: ["فهيم ينشئ المحتوى", "يصيغ النص", "يراجع الصياغة"],
+    };
+  }
+  return {
+    state: "thinking",
+    labels: ["فهيم يفكّر", "يرتّب أفكاره", "يجهّز الإجابة"],
+  };
+}
+
+function createActivityIndicator({ state, labels }) {
+  const indicator = document.createElement("div");
+  indicator.className = "typing";
+  indicator.dataset.state = state;
+  indicator.setAttribute("aria-label", labels[0]);
+
+  const icon = document.createElement("span");
+  icon.className = "typing-icon";
+  icon.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 3; index += 1) {
+    icon.append(document.createElement("b"));
+  }
+
+  const label = document.createElement("span");
+  label.className = "typing-label";
+  label.textContent = labels[0];
+
+  indicator.append(icon, label);
+  for (let index = 0; index < 3; index += 1) {
+    indicator.append(document.createElement("i"));
+  }
+
+  let step = 0;
+  const timer = window.setInterval(() => {
+    if (!indicator.isConnected) {
+      window.clearInterval(timer);
+      return;
+    }
+    step = (step + 1) % labels.length;
+    label.textContent = labels[step];
+    indicator.setAttribute("aria-label", labels[step]);
+  }, 2600);
+
+  return indicator;
+}
+
+// ===== حصة المرفقات اليومية =====
+const quotaRow = document.querySelector("#quota-row");
+const quotaText = document.querySelector("#quota-text");
+let uploadQuota = null;
+
+function renderUploadQuota() {
+  if (!quotaRow) return;
+  if (!uploadQuota || uploadQuota.unlimited) {
+    quotaRow.classList.add("hidden");
+    return;
+  }
+  const left = uploadQuota.remaining;
+  quotaRow.classList.remove("hidden");
+  quotaRow.classList.toggle("empty", left <= 0);
+  quotaRow.classList.toggle("low", left === 1);
+  const number = (value) => Number(value).toLocaleString("ar");
+  quotaText.textContent =
+    left > 0
+      ? `متبقي لك ${number(left)} من ${number(uploadQuota.limit)} مرفقات اليوم`
+      : "انتهت مرفقاتك لهذا اليوم، عُد غدًا";
+}
+
+async function refreshUploadQuota() {
+  try {
+    const result = await apiRequest("/api/uploads/quota", { suppressAuthOverlay: true });
+    uploadQuota = result.quota;
+    renderUploadQuota();
+  } catch {
+    // العدّاد غير ضروري لعمل الدردشة
+  }
+}
+
+function ensureUploadAllowed() {
+  if (!uploadQuota || uploadQuota.unlimited || uploadQuota.remaining > 0) return true;
+  showToast("انتهت مرفقاتك لهذا اليوم، عُد غدًا.");
+  return false;
+}
+
+// ===== المظهر (فاتح / داكن) =====
+const THEME_KEY = "faheem_theme";
+const DEFAULT_THEME = "light";
+const themeButtons = document.querySelectorAll("[data-theme-option]");
+
+function applyTheme(theme, { save = false } = {}) {
+  const value = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = value;
+  try {
+    localStorage.setItem(THEME_KEY, value);
+  } catch {
+    // التخزين غير متاح
+  }
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", value === "dark" ? "#101114" : "#ffffff");
+  themeButtons.forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.themeOption === value));
+  });
+  if (save) {
+    fetch("/api/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ theme: value }),
+    }).catch(() => {});
+  }
+}
+
+async function loadThemePreference() {
+  try {
+    const result = await apiRequest("/api/preferences", { suppressAuthOverlay: true });
+    applyTheme(result?.preferences?.theme || DEFAULT_THEME);
+  } catch {
+    // نبقى على المظهر الحالي
+  }
+}
+
+themeButtons.forEach((button) => {
+  button.addEventListener("click", () => applyTheme(button.dataset.themeOption, { save: true }));
+});
+applyTheme(document.documentElement.dataset.theme);
+
+// الصورة الخلفية (images.jpg) تحتفظ بمظهرها الأصلي وتظليلها الأسود في المظهرين:
+// نعلّم العنصر الذي يحملها (أو ::before / ::after) ليستثنيه theme.css من قلب الألوان.
+function markPhotoBackgrounds() {
+  for (const element of document.querySelectorAll("body *")) {
+    if (element.parentElement?.closest("[data-photo-bg]")) continue;
+    for (const pseudo of [null, "::before", "::after"]) {
+      const image = window.getComputedStyle(element, pseudo).backgroundImage;
+      if (image && image.includes("images.jpg")) {
+        element.dataset.photoBg = "true";
+        break;
+      }
+    }
+  }
+}
+
+markPhotoBackgrounds();
+window.addEventListener("load", markPhotoBackgrounds);
+
+// اكتب في أي مكان فيذهب النص إلى مربع الدردشة (على الحاسوب)
+document.addEventListener("keydown", (event) => {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) return;
+  const target = event.target;
+  if (
+    target instanceof HTMLElement &&
+    (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(target.tagName))
+  ) {
+    return;
+  }
+  if (touchDevice.matches || input.disabled || !authOverlay.classList.contains("hidden")) return;
+  if (document.querySelector(".auth-overlay:not(.hidden)")) return;
+  input.focus({ preventScroll: true });
+});
+
+function afterAuthenticated() {
+  window.setTimeout(focusInputAuto, 400);
+  new Image().src = "/loader-robot.webp"; // تُخزَّن مسبقًا لتظهر شاشة فتح المحادثة فورًا
+  refreshUploadQuota();
+  loadThemePreference();
 }
 
 async function sendMessage(message) {
   const text = message.trim();
 
-  if ((!text && !selectedImage && !selectedFile) || sendButton.disabled) {
+  if ((selectedImage || selectedFile) && !ensureUploadAllowed()) {
+    return;
+  }
+
+  if ((!text && !selectedImage && !selectedFile) || isSending) {
     return;
   }
 
@@ -1472,33 +2099,34 @@ async function sendMessage(message) {
     displayedFileName = selectedFile.name;
   }
 
-  const visibleText = displayedFileName
-    ? `${text}${text ? "\n" : ""}مرفق ملف: ${displayedFileName}`
-    : text;
-
-  appendMessage("user", visibleText, displayedImage);
-
   removeSelectedImage();
   removeSelectedFile();
 
   input.value = "";
   input.style.height = "auto";
 
+  await deliverMessage({ text, image, file, displayedImage, displayedFileName });
+}
+
+// يرسل رسالة جاهزة (نص + صورة/ملف مشفّرين)؛ تُستعمل للإرسال الجديد ولإعادة الإرسال
+async function deliverMessage(payload) {
+  const { text, image, file, displayedImage, displayedFileName } = payload;
+
+  if (isSending) return;
+  if ((image || file) && !ensureUploadAllowed()) return;
+
+  const visibleText = displayedFileName
+    ? `${text}${text ? "\n" : ""}مرفق ملف: ${displayedFileName}`
+    : text;
+
+  const userBody = appendMessage("user", visibleText, displayedImage);
+  addResendAction(userBody, payload, userBody.messageElement);
+
   const assistantBody = appendMessage("assistant", "");
 
-  const typing = document.createElement("div");
-  typing.className = "typing";
-  typing.setAttribute("aria-label", "فهيم يفكر");
-
-  const typingLabel = document.createElement("span");
-  typingLabel.className = "typing-label";
-  typingLabel.textContent = "فهيم يفكّر";
-
-  typing.append(typingLabel);
-
-  for (let index = 0; index < 3; index += 1) {
-    typing.append(document.createElement("i"));
-  }
+  const typing = createActivityIndicator(
+    detectActivity(text, Boolean(image), Boolean(file)),
+  );
 
   assistantBody.append(typing);
 
@@ -1511,6 +2139,9 @@ async function sendMessage(message) {
 
   setBusy(true);
 
+  const request = { controller: new AbortController(), stopped: false };
+  activeRequest = request;
+  const streamState = {};
   let refreshHistory = false;
 
   try {
@@ -1522,6 +2153,7 @@ async function sendMessage(message) {
       },
       credentials: "same-origin",
       cache: "no-store",
+      signal: request.controller.signal,
       body: JSON.stringify({
         message: text,
         image,
@@ -1547,6 +2179,10 @@ async function sendMessage(message) {
               result?.error ||
               result?.message ||
               errorMessage;
+            if (result?.code === "upload_limit" && result.quota) {
+              uploadQuota = result.quota;
+              renderUploadQuota();
+            }
           } catch {
             // إذا كان الرد نصًا وليس JSON
             errorMessage = rawText.trim().slice(0, 500);
@@ -1578,26 +2214,48 @@ async function sendMessage(message) {
       assistantBody,
       name,
       answer,
+      streamState,
     );
 
     currentConversationId = result.conversationId;
     refreshHistory = true;
 
-  } catch (error) {
-    assistantBody.remove();
+    const nearBottom =
+      conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 200;
+    addReplyActions(assistantBody, result.answer);
+    if (nearBottom) scrollToLatest();
 
-    showToast(
-      error instanceof Error
-        ? error.message
-        : "حدث خطأ غير متوقع.",
-    );
+  } catch (error) {
+    if (request.stopped) {
+      // أوقف الطالب الرد: نُبقي ما وصل منه، أو نحذف الفقاعة الفارغة
+      if (streamState.answerText && assistantBody.contains(answer)) {
+        const note = document.createElement("div");
+        note.className = "message-stopped";
+        note.textContent = "تم إيقاف الرد";
+        assistantBody.append(note);
+        addReplyActions(assistantBody, streamState.answerText);
+      } else {
+        assistantBody.remove();
+      }
+    } else {
+      assistantBody.remove();
+
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "حدث خطأ غير متوقع.",
+      );
+    }
 
     refreshHistory = true;
 
   } finally {
+    if (activeRequest === request) activeRequest = null;
     setBusy(false);
     input.focus();
   }
+
+  if (image || file) refreshUploadQuota();
 
   if (refreshHistory) {
     try {
@@ -1659,6 +2317,10 @@ function setupSpeechRecognition() {
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (isSending) {
+    stopGeneration();
+    return;
+  }
   sendMessage(input.value).catch((error) => {
     showToast(error instanceof Error ? error.message : "تعذّرت قراءة الرسالة.");
   });
@@ -1676,8 +2338,12 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-document.querySelector("#upload-button").addEventListener("click", () => imageInput.click());
-document.querySelector("#file-upload-button").addEventListener("click", () => fileInput.click());
+document.querySelector("#upload-button").addEventListener("click", () => {
+  if (ensureUploadAllowed()) imageInput.click();
+});
+document.querySelector("#file-upload-button").addEventListener("click", () => {
+  if (ensureUploadAllowed()) fileInput.click();
+});
 imageInput.addEventListener("change", () => {
   const file = imageInput.files?.[0];
   if (!file) return;
@@ -1717,18 +2383,25 @@ document.querySelectorAll(".suggestion").forEach((button) => {
 });
 
 function resetChat() {
-  if (sendButton.disabled) return;
+  if (isSending) return;
+  conversationLoadToken += 1;
+  loadingConversationId = null;
+  conversation.removeAttribute("aria-busy");
   conversation.replaceChildren(welcome);
   welcome.classList.remove("hidden");
   removeSelectedImage();
   removeSelectedFile();
   input.value = "";
-  input.focus();
+  focusInputAuto();
   currentConversationId = null;
   setMobileMenuOpen(false);
 }
 
 setupSpeechRecognition();
+authEmail.addEventListener("input", updateNameHint);
+// أول زيارة: إنشاء حساب أولًا، ومن سبق أن سجّل دخوله يرى تسجيل الدخول
+setAuthMode(document.documentElement.classList.contains("no-loader") ? "register" : "login");
+
 initializeApp();
 
 authModeToggle.addEventListener("click", () => {
@@ -1742,7 +2415,9 @@ function closePasswordOverlay() {
 }
 
 forgotPasswordLink.addEventListener("click", () => {
-  helpGuestEmail.value = authEmail.value.trim();
+  const typed = authEmail.value.trim();
+  if (typed.includes("@")) helpGuestEmail.value = typed;
+  else helpGuestName.value = typed;
   openHelpCenter({ guest: true });
 });
 document.querySelectorAll(".password-toggle").forEach((button) => {
@@ -1905,28 +2580,71 @@ changePasswordForm.addEventListener("submit", async (event) => {
 
 authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!authForm.reportValidity()) return;
-  authSubmit.disabled = true;
   authError.textContent = "";
+  const registering = authMode === "register";
+  let body;
+
+  if (registering) {
+    const nameError = validateFullNameClient(authEmail.value);
+    if (nameError) {
+      authError.textContent = nameError;
+      authEmail.focus();
+      return;
+    }
+    const grade = authForm.querySelector('input[name="grade"]:checked')?.value;
+    if (!grade) {
+      authError.textContent = "اختر صفك الدراسي.";
+      return;
+    }
+    if (authPassword.value.length < PASSWORD_MIN_LENGTH) {
+      authError.textContent = `أنشئ كلمة مرور من ${PASSWORD_MIN_LENGTH.toLocaleString("ar")} أحرف على الأقل.`;
+      authPassword.focus();
+      return;
+    }
+    if (authPassword.value !== authPasswordConfirm.value) {
+      authError.textContent = "كلمتا المرور غير متطابقتين.";
+      authPasswordConfirm.focus();
+      return;
+    }
+    body = {
+      fullName: authEmail.value.trim(),
+      grade,
+      password: authPassword.value,
+      remember: rememberDevice.checked,
+    };
+  } else {
+    if (!authForm.reportValidity()) return;
+    body = {
+      identifier: authEmail.value.trim(),
+      password: authPassword.value,
+      remember: rememberDevice.checked,
+    };
+  }
+
+  authSubmit.disabled = true;
   try {
     const result = await apiRequest(
-      authMode === "register" ? "/api/auth/register" : "/api/auth/login",
+      registering ? "/api/auth/register" : "/api/auth/login",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: authEmail.value,
-          password: authPassword.value,
-          remember: rememberDevice.checked,
-        }),
+        body: JSON.stringify(body),
       },
     );
     setAuthenticated(result.user, result.isAdmin, result.isPrimaryAdmin);
     authPassword.value = "";
+    authPasswordConfirm.value = "";
+    authForm.querySelectorAll('input[name="grade"]').forEach((radio) => {
+      radio.checked = false;
+    });
     setAuthMode("login");
     await loadHistory();
   } catch (error) {
-    authError.textContent = error.message;
+    // هذه الرسالة لا يرسلها إلا server.py القديم (يطلب البريد بدل الاسم الرباعي)
+    authError.textContent =
+      error.message === "أدخل البريد الإلكتروني وكلمة المرور."
+        ? "الخادم يعمل بنسخة قديمة من server.py. استبدله بالنسخة الجديدة ثم أعد تشغيل الخادم."
+        : error.message;
   } finally {
     authSubmit.disabled = false;
   }
@@ -1957,10 +2675,16 @@ logoutButton.addEventListener("click", async () => {
   }
 });
 
-adminButton.addEventListener("click", async () => {
-  adminOverlay.classList.remove("hidden");
+adminButton.addEventListener("click", () => {
   setMobileMenuOpen(false);
-  await loadAdminDashboard();
+  // تفتح لوحة التحكم في تبويب جديد (الجلسة نفسها، فلا تحتاج لتسجيل دخول ثانٍ)
+  const link = document.createElement("a");
+  link.href = "/admin.html";
+  link.target = "_blank";
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
 });
 window.setInterval(() => {
   if (!adminOverlay.classList.contains("hidden")) {

@@ -266,3 +266,24 @@ html[data-theme="light"] .convo-loader:not([data-photo-bg] *) {
 /* الاسم الرباعي في القائمة الجانبية: يُقصّ بنقاط بدل أن يكسر التصميم */
 .profile-copy { min-width: 0; flex: 1; }
 .profile-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ===== زر الإيقاف (يحل محل الإرسال) + إعادة الإرسال ===== */
+.send-button .stop-icon { display: none; }
+.send-button .stop-icon rect { fill: currentColor; stroke: none; }
+.send-button.is-stop .send-icon { display: none; }
+.send-button.is-stop .stop-icon { display: block; }
+.send-button.is-stop { cursor: pointer; animation: stop-pulse 1.8s ease-in-out infinite; }
+@keyframes stop-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 107, 107, .0); }
+  50% { box-shadow: 0 0 0 6px rgba(239, 107, 107, .22); }
+}
+.resend-button {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font: inherit; font-size: 12px; line-height: 1; color: inherit; background: transparent;
+  border: 1px solid rgba(127, 127, 127, .32); border-radius: 8px; padding: 6px 10px; opacity: .75;
+  user-select: none; -webkit-user-select: none;
+  transition: opacity .15s ease, background .15s ease;
+}
+.resend-button:hover:not(:disabled), .resend-button:focus-visible { opacity: 1; background: rgba(127, 127, 127, .16); }
+.resend-button:disabled { opacity: .35; cursor: not-allowed; }
+.message-stopped { margin-top: 6px; font-size: 12px; opacity: .65; }
