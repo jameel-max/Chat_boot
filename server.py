@@ -217,7 +217,24 @@ def get_database():
                     raise RuntimeError(
                         "Set DATABASE_URL to a PostgreSQL connection URL."
                     )
-                database = Database(database_url)
+                initialized_database = Database(database_url)
+                admin_password = os.environ.get("ADMIN_PASSWORD", "")
+                if admin_password:
+                    if len(admin_password) < PASSWORD_MIN_LENGTH:
+                        raise RuntimeError(
+                            f"ADMIN_PASSWORD must be at least {PASSWORD_MIN_LENGTH} characters."
+                        )
+                    admin_email = os.environ.get(
+                        "ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL
+                    ).strip()
+                    if not re.fullmatch(
+                        r"[^@\s]+@[^@\s]+\.[^@\s]+", admin_email
+                    ):
+                        raise RuntimeError("ADMIN_EMAIL must be a valid email address.")
+                    initialized_database.ensure_primary_admin(
+                        admin_email, admin_password
+                    )
+                database = initialized_database
     return database
 
 
