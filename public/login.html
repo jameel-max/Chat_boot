@@ -12,10 +12,21 @@
     (function () {
       var root = document.documentElement;
       try {
-        root.dataset.theme = localStorage.getItem("faheem_theme") === "dark" ? "dark" : "light";
+        var savedTheme = localStorage.getItem("faheem_theme");
+        var systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var theme = savedTheme === "dark" || savedTheme === "light"
+          ? savedTheme
+          : systemPrefersDark ? "dark" : "light";
+        root.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]').content =
+          theme === "dark" ? "#101114" : "#ffffff";
         // من سبق أن سجّل دخوله غالبًا لديه جلسة: نُخفي الصفحة لحظة التحقق لنتجنب وميض النموذج
         if (localStorage.getItem("faheem_logged_in_before")) root.classList.add("checking");
-      } catch (e) { root.dataset.theme = "light"; }
+      } catch (e) {
+        root.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+      }
     })();
   </script>
   <style>
@@ -306,7 +317,6 @@
       const errorBox = $("error");
       const submitButton = $("submit");
 
-      const readFlag = () => { try { return Boolean(localStorage.getItem(FLAG)); } catch { return false; } };
       const writeFlag = () => { try { localStorage.setItem(FLAG, "1"); sessionStorage.removeItem(BOUNCE); } catch { /* التخزين غير متاح */ } };
       const nextUrl = () => {
         const next = params.get("next") || "/";
@@ -361,7 +371,7 @@
 
       /* ===== وضع الصفحة: إنشاء حساب / تسجيل دخول ===== */
       const requestedMode = params.get("mode");
-      let mode = requestedMode === "login" || requestedMode === "register" ? requestedMode : (readFlag() ? "login" : "register");
+      let mode = requestedMode === "login" ? "login" : "register";
 
       function setMode(next) {
         mode = next;

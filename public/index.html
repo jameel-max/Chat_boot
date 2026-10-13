@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#101114">
+    <meta name="theme-color" content="#ffffff">
     <title>فهيم — المساعد الذكي لمدرسة خريبة السوق الثانوية الثانية للبنين</title>
     <link rel="icon" type="image/svg+xml" href="school-logo.png">
     <link rel="preload" as="image" href="/loader-robot.webp" type="image/webp">
@@ -11,13 +11,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script>try{var t=localStorage.getItem("faheem_theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
+    <script>try{var t=localStorage.getItem("faheem_theme"),d=t==="dark"||t==="light"?t:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=d;document.querySelector('meta[name="theme-color"]').content=d==="dark"?"#101114":"#ffffff"}catch(e){document.documentElement.dataset.theme=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}</script>
     <script>try{if(!localStorage.getItem("faheem_logged_in_before"))location.replace("/login.html")}catch(e){}</script>
     <link rel="stylesheet" href="/style.css?v=24">
     <link rel="stylesheet" href="/extras.css?v=7">
     <link rel="stylesheet" href="/theme.css?v=4">
     <script>try{if(localStorage.getItem("faheem_sidebar_collapsed")==="1")document.documentElement.classList.add("sidebar-collapsed")}catch(e){}</script>
-    <script src="/app.js?v=49" defer></script>
+    <script src="/app.js?v=50" defer></script>
   </head>
   <body>
     <div class="app-loader" id="app-loader" role="status" aria-live="polite" aria-label="جارٍ التحميل">

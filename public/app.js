@@ -338,6 +338,24 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => toast.classList.remove("visible"), 5000);
 }
 
+function serverStatusMessage(status) {
+  if (status === 429) {
+    return "الخادم مشغول حاليًا. انتظر قليلًا ثم اضغط «إعادة الإرسال»؛ رسالتك محفوظة.";
+  }
+  if (status === 502 || status === 503 || status === 504 || status >= 500) {
+    return "واجه الخادم مشكلة مؤقتة. انتظر قليلًا ثم أعد المحاولة. إذا استمرت، حدّث الصفحة.";
+  }
+  return null;
+}
+
+function studentErrorMessage(error, fallback = "حدث خطأ غير متوقع.") {
+  const message = error instanceof Error ? error.message : "";
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(message)) {
+    return "تعذّر الاتصال بالخادم. تحقق من اتصال الإنترنت ثم حاول مرة أخرى.";
+  }
+  return message || fallback;
+}
+
 function scrollToLatest() {
   conversation.scrollTop = conversation.scrollHeight;
 }
@@ -1171,13 +1189,26 @@ function readImageAsDataUrl(file) {
 async function apiRequest(url, options = {}) {
   const { suppressAuthOverlay = false, ...requestOptions } = options;
 
-  const response = await fetch(url, {
-    cache: "no-store",
-    credentials: "same-origin",
-    ...requestOptions,
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      cache: "no-store",
+      credentials: "same-origin",
+      ...requestOptions,
+    });
+  } catch (error) {
+    throw new Error(studentErrorMessage(error, "تعذّر الاتصال بالخادم. حاول مرة أخرى."));
+  }
 
   if (!response.ok) {
+    const serverMessage = serverStatusMessage(response.status);
+    if (serverMessage) {
+      if (response.status === 401 && !suppressAuthOverlay) {
+        redirectToLogin("expired");
+      }
+      throw new Error(serverMessage);
+    }
+
     let detail = "تعذّر إكمال الطلب.";
 
     try {
@@ -1848,17 +1879,21 @@ function ensureUploadAllowed() {
 
 // ===== المظهر (فاتح / داكن) =====
 const THEME_KEY = "faheem_theme";
-const DEFAULT_THEME = "light";
+const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+let savedTheme = null;
+try {
+  const storedTheme = localStorage.getItem(THEME_KEY);
+  if (storedTheme === "light" || storedTheme === "dark") savedTheme = storedTheme;
+} catch {
+  // التخزين غير متاح
+}
+const DEFAULT_THEME = savedTheme || (systemTheme.matches ? "dark" : "light");
+let hasSavedThemePreference = Boolean(savedTheme);
 const themeButtons = document.querySelectorAll("[data-theme-option]");
 
 function applyTheme(theme, { save = false } = {}) {
   const value = theme === "dark" ? "dark" : "light";
   document.documentElement.dataset.theme = value;
-  try {
-    localStorage.setItem(THEME_KEY, value);
-  } catch {
-    // التخزين غير متاح
-  }
   document
     .querySelector('meta[name="theme-color"]')
     ?.setAttribute("content", value === "dark" ? "#101114" : "#ffffff");
@@ -1866,6 +1901,12 @@ function applyTheme(theme, { save = false } = {}) {
     button.setAttribute("aria-pressed", String(button.dataset.themeOption === value));
   });
   if (save) {
+    hasSavedThemePreference = true;
+    try {
+      localStorage.setItem(THEME_KEY, value);
+    } catch {
+      // التخزين غير متاح
+    }
     fetch("/api/preferences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1878,11 +1919,21 @@ function applyTheme(theme, { save = false } = {}) {
 async function loadThemePreference() {
   try {
     const result = await apiRequest("/api/preferences", { suppressAuthOverlay: true });
-    applyTheme(result?.preferences?.theme || DEFAULT_THEME);
+    const preference = result?.preferences?.theme;
+    if (preference === "light" || preference === "dark") {
+      hasSavedThemePreference = true;
+      applyTheme(preference);
+    } else {
+      applyTheme(DEFAULT_THEME);
+    }
   } catch {
     // نبقى على المظهر الحالي
   }
 }
+
+systemTheme.addEventListener("change", (event) => {
+  if (!hasSavedThemePreference) applyTheme(event.matches ? "dark" : "light");
+});
 
 themeButtons.forEach((button) => {
   button.addEventListener("click", () => applyTheme(button.dataset.themeOption, { save: true }));
@@ -2120,9 +2171,7 @@ async function deliverMessage(payload) {
       (assistantBody.messageElement || assistantBody).remove();
 
       showToast(
-        error instanceof Error
-          ? error.message
-          : "حدث خطأ غير متوقع.",
+        studentErrorMessage(error),
       );
     }
 
