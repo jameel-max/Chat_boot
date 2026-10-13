@@ -722,6 +722,36 @@ def validate_full_name(raw):
     return display, None
 
 
+def normalize_phone_number(raw):
+    required_error = "أدخل رقم هاتفك لإكمال إنشاء الحساب."
+    error = (
+        "رقم الهاتف غير صالح. أدخل رقمًا أردنيًا يبدأ بـ 077 أو 078 أو 079، "
+        "أو بصيغة +962."
+    )
+    if raw is None:
+        return None, required_error
+    if not isinstance(raw, str):
+        return None, error
+
+    phone = raw.translate(
+        str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+    ).strip()
+    if not phone:
+        return None, required_error
+    if len(phone) > 32 or not re.fullmatch(r"[0-9+\s().-]+", phone):
+        return None, error
+
+    compact = re.sub(r"[\s().-]", "", phone)
+    if compact.startswith("00"):
+        compact = "+" + compact[2:]
+    elif re.fullmatch(r"07[789][0-9]{7}", compact):
+        compact = "+962" + compact[1:]
+
+    if re.fullmatch(r"\+9627[789][0-9]{7}", compact):
+        return compact, None
+    return None, error
+
+
 def student_email(tokens):
     return ".".join(tokens) + "@" + STUDENT_EMAIL_DOMAIN
 
@@ -1999,6 +2029,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if grade_key not in GRADE_CHOICES:
             self.send_json({"error": "اختر صفك الدراسي."}, 400)
             return
+        phone, error = normalize_phone_number(payload.get("phone"))
+        if error:
+            self.send_json({"error": error}, 400)
+            return
         extra = self.password_and_remember(payload)
         if extra is None:
             return
@@ -2010,7 +2044,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         email = student_email(name_tokens(full_name))
         try:
-            user = get_database().register_user(email, password)
+            user = get_database().register_user(email, password, phone)
         except Database.integrity_error_types:
             self.send_json(
                 {"error": "هذا الاسم مسجّل مسبقًا. سجّل الدخول بدلًا من إنشاء حساب جديد."},

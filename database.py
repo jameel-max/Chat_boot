@@ -79,6 +79,7 @@ class Database:
                     name TEXT NOT NULL,
                     picture TEXT NOT NULL DEFAULT '',
                     password_hash TEXT,
+                    phone TEXT,
                     grade TEXT,
                     grade_question_asked INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL
@@ -226,6 +227,13 @@ class Database:
                 connection.execute(
                     """
                     ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS phone TEXT
+                    """
+                )
+
+                connection.execute(
+                    """
+                    ALTER TABLE users
                     ADD COLUMN IF NOT EXISTS grade TEXT
                     """
                 )
@@ -270,6 +278,14 @@ class Database:
                         """
                         ALTER TABLE users
                         ADD COLUMN password_hash TEXT
+                        """
+                    )
+
+                if "phone" not in user_columns:
+                    connection.execute(
+                        """
+                        ALTER TABLE users
+                        ADD COLUMN phone TEXT
                         """
                     )
 
@@ -488,6 +504,7 @@ class Database:
         self,
         email,
         password,
+        phone=None,
     ):
 
         now = int(time.time())
@@ -506,9 +523,10 @@ class Database:
                         name,
                         picture,
                         password_hash,
+                        phone,
                         created_at
                     )
-                VALUES (?, ?, ?, ?, '', ?, ?)
+                VALUES (?, ?, ?, ?, '', ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -516,6 +534,7 @@ class Database:
                     email,
                     email.partition("@")[0],
                     self.hash_password(password),
+                    phone,
                     now,
                 ),
             )
@@ -1033,6 +1052,7 @@ class Database:
                     users.id,
                     users.email,
                     users.name,
+                    users.phone,
                     users.created_at,
 
                     CASE
