@@ -176,6 +176,7 @@
     .dialog-actions { display: flex; gap: 10px; margin-top: 10px; }
     .dialog-actions .submit { flex: 1; }
 
+    @media (min-width: 901px) { .panel { order: -1; } }
     @media (max-width: 900px) {
       .page { grid-template-columns: 1fr; }
       .hero { padding: 26px 16px 8px; gap: 10px; border-inline-end: 0; background: radial-gradient(circle at 50% 0%, var(--hero-a), transparent 70%), var(--bg); }
