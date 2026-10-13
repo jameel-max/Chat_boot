@@ -85,7 +85,7 @@ _database_lock = threading.Lock()
 
 SYSTEM_INSTRUCTION = (
     "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
-    "انشئ جدولا اذا احتاج الامر ذلك"
+    "انشئ جدولا اذا كانت المعلومات غير واضحة كنص."
 )
 
 GRADE_NAMES = {
@@ -151,6 +151,20 @@ def user_starts_with_greeting(message):
     return re.match(
         r"^(?:السلام عليكم|سلام|مرحبا|مرحباً|أهلا|اهلا|أهلًا|هلا|"
         r"صباح الخير|مساء الخير|هاي|hello|hi)(?=$|[\s،,:.!؟!?-])",
+        normalized,
+    ) is not None
+
+
+def user_asks_own_grade(message):
+    normalized = message.casefold().translate(str.maketrans("أإآ", "ااا"))
+    normalized = re.sub(r"[\u064b-\u065f\u0670ـ]", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return re.search(
+        r"(?:كم|شو|ايش|وش|ما)\s+(?:هو\s+)?صفي\b|"
+        r"(?:انا|اني)\s+(?:(?:في|ب)\s*)?(?:اي|كم)\s+(?:ال)?صف\b|"
+        r"(?:باي|في\s+اي)\s+(?:ال)?صف\s+(?:انا|اني)\b|"
+        r"(?:اي|ما)\s+(?:هو\s+)?(?:ال)?صف\s+(?:انا|اني)\b|"
+        r"(?:شو|ايش|ما)\s+(?:هو\s+)?الصف\s+المسجل\s+(?:عندي|لي)\b",
         normalized,
     ) is not None
 
@@ -370,7 +384,10 @@ def build_conversation_input(
         - image_tokens
     )
     if available_tokens < 0:
-        raise ValueError("تجاوزت الرسالة والمرفقات حد سياق Gemini.")
+        raise ValueError(
+            "رسالتك ومرفقاتك أكبر من الحد المسموح. احذف بعض المرفقات "
+            "أو أرسلها في رسائل منفصلة."
+        )
 
     rendered_history = []
     image_number = 0
@@ -422,7 +439,10 @@ def build_conversation_input(
         ).encode("utf-8")
     )
     if request_size > MAX_GEMINI_REQUEST_BYTES:
-        raise ValueError("تجاوز حجم سياق المحادثة حد طلب Gemini.")
+        raise ValueError(
+            "المحادثة طويلة جدًا لإكمال الطلب. ابدأ محادثة جديدة "
+            "أو أرسل صورًا أقل."
+        )
 
     return parts
 
@@ -922,6 +942,28 @@ class ChatHandler(SimpleHTTPRequestHandler):
         self._last_status = code
         super().send_response(code, message)
 
+    def send_error(self, code, message=None, explain=None):
+        if code == 404:
+            title = "الصفحة غير موجودة"
+            guidance = "تحقق من الرابط، أو ارجع إلى الصفحة الرئيسية."
+        elif code >= 500:
+            title = "الخادم يواجه مشكلة مؤقتة"
+            guidance = "انتظر قليلًا ثم حدّث الصفحة."
+        else:
+            title = "تعذّر فتح الصفحة"
+            guidance = "تحقق من الرابط وحاول مرة أخرى."
+
+        body = (
+            "<!doctype html><html lang=\"ar\"><meta charset=\"utf-8\">"
+            f"<title>{title}</title><main><h1>{title}</h1><p>{guidance}</p></main></html>"
+        ).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
     def end_headers(self):
         visitor_token = getattr(self, "new_visitor_token", None)
         if visitor_token:
@@ -1346,9 +1388,6 @@ class ChatHandler(SimpleHTTPRequestHandler):
         generate_image = (
             payload.get("generateImage") is True or wants_image_generation(message)
         )
-        if not generate_image and os.environ.get("GEMINI_API_KEY", "").strip():
-            # نفتح اتصال TLS مع Gemini الآن بالتوازي مع قاعدة البيانات بدل انتظارها.
-            self.start_gemini_prewarm()
         student_started = time.perf_counter()
         student_preferences = get_database().get_student_preferences(user["id"])
         if not student_preferences:
@@ -1412,13 +1451,73 @@ class ChatHandler(SimpleHTTPRequestHandler):
             not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
             for character in model
         ):
-            self.send_json({"error": "اسم نموذج Gemini في الإعدادات غير صالح."}, 500)
+            self.send_json(
+                {
+                    "error": (
+                        "المساعد غير جاهز الآن. حاول لاحقًا، وإذا استمرت المشكلة "
+                        "أخبر المعلم."
+                    )
+                },
+                500,
+            )
             return
 
         stored["user_id"] = user["id"]
         stored["mark_grade_question_asked"] = ask_grade
         if stored["title_needs_ai"]:
             stored["title_source"] = title_message
+        if (
+            not generate_image
+            and image is None
+            and attachment is None
+            and user_asks_own_grade(message)
+        ):
+            if student_preferences["grade"]:
+                local_answer = (
+                    f"صفك المسجّل عندي هو {student_preferences['grade']}."
+                )
+            else:
+                local_answer = (
+                    "ما عندي صفك محفوظ لسه. احكيلي بأي صف إنت، وبحفظه في ملفك."
+                )
+            local_response_id = f"local-{secrets.token_hex(16)}"
+            try:
+                get_database().complete_assistant_message(
+                    stored["id"],
+                    local_answer,
+                    local_response_id,
+                    user_id=user["id"],
+                    grade_question_asked=not student_preferences["grade"],
+                )
+            except Database.error_types:
+                self.send_json({"error": "تعذّر حفظ الرد في سجل المحادثة."}, 500)
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("Connection", "close")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            self.close_connection = True
+            self.send_sse(
+                "conversation",
+                {"conversationId": stored["id"], "title": stored["title"]},
+            )
+            self.send_sse("delta", {"text": local_answer})
+            self.send_sse(
+                "done",
+                {
+                    "responseId": local_response_id,
+                    "conversationId": stored["id"],
+                    "title": stored["title"],
+                },
+            )
+            return
+
+        if not generate_image and os.environ.get("GEMINI_API_KEY", "").strip():
+            # افتح الاتصال فقط بعد استبعاد الردود التي لا تحتاج Gemini.
+            self.start_gemini_prewarm()
         if generate_image:
             self.send_image_creation_unavailable(stored)
             return
@@ -1428,8 +1527,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json(
                 {
                     "error": (
-                        "أضف مفتاح Gemini في GEMINI_API_KEY داخل ملف .env "
-                        "ثم أعد تشغيل الخادم."
+                        "المساعد غير متاح الآن. حاول مرة أخرى بعد قليل، "
+                        "أو أخبر المعلم."
                     )
                 },
                 503,
@@ -1469,8 +1568,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_json(
                     {
                         "error": (
-                            "الصور السابقة المطلوبة تتجاوز حد حجم Gemini. "
-                            "أرسل الصور المطلوبة في رسائل أقل أو اختر الصور اللازمة فقط."
+                            "الصور التي اخترتها كثيرة. أرسل الصور المهمة فقط "
+                            "أو قسّمها على أكثر من رسالة."
                         )
                     },
                     413,
@@ -1517,7 +1616,15 @@ class ChatHandler(SimpleHTTPRequestHandler):
             request_payload["generation_config"] = {"thinking_level": thinking_level}
         request_data = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
         if len(request_data) > MAX_GEMINI_REQUEST_BYTES:
-            self.send_json({"error": "تجاوز حجم السياق حد طلب Gemini."}, 413)
+            self.send_json(
+                {
+                    "error": (
+                        "المحادثة طويلة جدًا لإكمال الطلب. ابدأ محادثة جديدة "
+                        "أو أرسل صورًا أقل."
+                    )
+                },
+                413,
+            )
             return
         request_headers = {
             "x-goog-api-key": api_key,
@@ -1549,27 +1656,57 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 completed = self.stream_gemini_response(response, stored)
                 if not completed:
                     self.send_sse(
-                        "error", {"error": "انقطع اتصال Gemini قبل اكتمال الإجابة."}
+                        "error",
+                        {
+                            "error": (
+                                "انقطع الرد قبل اكتماله. اضغط «إعادة الإرسال» "
+                                "للمحاولة مرة أخرى."
+                            )
+                        },
                     )
                 return
         except HTTPError as error:
-            try:
-                error_body = json.loads(error.read())
-                detail = error_body.get("error", {}).get("message")
-            except (
-                json.JSONDecodeError,
-                UnicodeDecodeError,
-                AttributeError,
-                TypeError,
-            ):
-                detail = None
+            if error.code == 429:
+                detail = (
+                    "الخادم مشغول حاليًا بسبب كثرة الطلبات. "
+                    "انتظر قليلًا ثم اضغط «إعادة الإرسال»؛ رسالتك محفوظة."
+                )
+            elif error.code in {408, 425} or error.code >= 500:
+                detail = (
+                    "واجه المساعد مشكلة مؤقتة. انتظر قليلًا ثم أعد الإرسال؛ "
+                    "رسالتك محفوظة."
+                )
+            else:
+                detail = (
+                    "تعذّر على المساعد معالجة الرسالة. جرّب اختصار سؤالك "
+                    "أو إعادة صياغته."
+                )
             self.send_json(
-                {"error": detail or f"رفضت خدمة Gemini الطلب (HTTP {error.code})."},
+                {"error": detail},
                 error.code if 400 <= error.code < 600 else 502,
             )
             return
-        except (URLError, TimeoutError) as error:
-            self.send_json({"error": f"تعذّر الاتصال بخدمة Gemini: {error}"}, 502)
+        except TimeoutError:
+            self.send_json(
+                {
+                    "error": (
+                        "تأخر رد المساعد. انتظر قليلًا ثم اضغط «إعادة الإرسال»؛ "
+                        "رسالتك محفوظة."
+                    )
+                },
+                504,
+            )
+            return
+        except URLError:
+            self.send_json(
+                {
+                    "error": (
+                        "تعذّر الاتصال بالمساعد. تحقق من اتصال الإنترنت "
+                        "ثم حاول مرة أخرى."
+                    )
+                },
+                502,
+            )
             return
         except (BrokenPipeError, ConnectionResetError):
             return
@@ -1582,7 +1719,15 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     pass
             else:
-                self.send_json({"error": "تعذّر بدء بث Gemini."}, 502)
+                self.send_json(
+                    {
+                        "error": (
+                            "لم يتمكن المساعد من بدء الرد. انتظر قليلًا "
+                            "ثم أعد الإرسال."
+                        )
+                    },
+                    502,
+                )
             return
 
     def do_PATCH(self):
@@ -2407,12 +2552,18 @@ class ChatHandler(SimpleHTTPRequestHandler):
             try:
                 event_data = json.loads("\n".join(data_lines))
             except (json.JSONDecodeError, UnicodeDecodeError):
-                self.send_sse("error", {"error": "أعادت Gemini حدث بث غير مفهوم."})
+                self.send_sse(
+                    "error",
+                    {"error": "وصل رد غير واضح من المساعد. أعد إرسال سؤالك."},
+                )
                 completed = True
                 return
 
             if not isinstance(event_data, dict):
-                self.send_sse("error", {"error": "أعادت Gemini حدث بث غير مفهوم."})
+                self.send_sse(
+                    "error",
+                    {"error": "وصل رد غير واضح من المساعد. أعد إرسال سؤالك."},
+                )
                 completed = True
                 return
 
@@ -2440,10 +2591,18 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     interaction.get("id") if isinstance(interaction, dict) else None
                 )
                 if not answer_started:
-                    self.send_sse("error", {"error": "لم تُرجع Gemini إجابة نصية."})
+                    self.send_sse(
+                        "error", {"error": "لم يصل رد واضح. أعد إرسال سؤالك."}
+                    )
                 elif not isinstance(response_id, str) or not response_id:
                     self.send_sse(
-                        "error", {"error": "لم تُرجع Gemini معرّف المحادثة."}
+                        "error",
+                        {
+                            "error": (
+                                "واجه المساعد مشكلة مؤقتة. انتظر قليلًا "
+                                "ثم أعد الإرسال."
+                            )
+                        },
                     )
                 else:
                     try:
@@ -2475,16 +2634,13 @@ class ChatHandler(SimpleHTTPRequestHandler):
                         self.send_sse("done", done_payload)
                 completed = True
             elif event_type in {"interaction.failed", "error"}:
-                error = event_data.get("error")
-                message = (
-                    error.get("message") if isinstance(error, dict) else None
-                )
                 self.send_sse(
                     "error",
                     {
-                        "error": message
-                        if isinstance(message, str)
-                        else "تعذّر على Gemini إكمال الإجابة."
+                        "error": (
+                            "تعذّر إكمال الإجابة الآن. انتظر قليلًا ثم "
+                            "اضغط «إعادة الإرسال»؛ رسالتك محفوظة."
+                        )
                     },
                 )
                 completed = True
@@ -2492,9 +2648,26 @@ class ChatHandler(SimpleHTTPRequestHandler):
         while not completed:
             try:
                 raw_line = response.readline()
-            except (URLError, TimeoutError, OSError) as error:
+            except TimeoutError:
                 self.send_sse(
-                    "error", {"error": f"انقطع تدفق Gemini: {error}"}
+                    "error",
+                    {
+                        "error": (
+                            "تأخر رد المساعد. انتظر قليلًا ثم اضغط "
+                            "«إعادة الإرسال»؛ رسالتك محفوظة."
+                        )
+                    },
+                )
+                return True
+            except (URLError, OSError):
+                self.send_sse(
+                    "error",
+                    {
+                        "error": (
+                            "انقطع الاتصال بالمساعد. تحقق من اتصال الإنترنت "
+                            "ثم اضغط «إعادة الإرسال»."
+                        )
+                    },
                 )
                 return True
             if not raw_line:
@@ -2504,7 +2677,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
             try:
                 line = raw_line.decode("utf-8").rstrip("\r\n")
             except UnicodeDecodeError:
-                self.send_sse("error", {"error": "تعذّرت قراءة تدفق Gemini."})
+                self.send_sse(
+                    "error",
+                    {"error": "انقطع الرد قبل اكتماله. اضغط «إعادة الإرسال»."},
+                )
                 return True
 
             if not line:
