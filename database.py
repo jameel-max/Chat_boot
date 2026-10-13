@@ -531,6 +531,53 @@ class Database:
 
         return self.public_user(row)
 
+    def ensure_primary_admin(
+        self,
+        email,
+        password,
+    ):
+
+        email = email.strip().casefold()
+
+        with self.connect() as connection:
+
+            existing = connection.execute(
+                "SELECT 1 FROM users WHERE lower(email) = lower(?)",
+                (email,),
+            ).fetchone()
+            if existing:
+                return False
+
+            now = int(time.time())
+            user_id = uuid4().hex
+
+            cursor = connection.execute(
+                """
+                INSERT INTO users
+                    (
+                        id,
+                        google_sub,
+                        email,
+                        name,
+                        picture,
+                        password_hash,
+                        created_at
+                    )
+                VALUES (?, ?, ?, ?, '', ?, ?)
+                ON CONFLICT DO NOTHING
+                """,
+                (
+                    user_id,
+                    f"password:{email}",
+                    email,
+                    email.partition("@")[0],
+                    self.hash_password(password),
+                    now,
+                ),
+            )
+
+        return cursor.rowcount == 1
+
     def login_user(
         self,
         email,
