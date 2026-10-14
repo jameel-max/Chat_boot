@@ -229,6 +229,147 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn("اسم مستخدم", result["error"])
         self.assertTrue(server.database.user_exists(own_email))
 
+    def test_account_name_requires_four_arabic_words_and_unique_name(self):
+        old_name = "محمد أحمد علي الحسن"
+        own_email = server.student_email(server.name_tokens(old_name))
+        own = server.database.register_user(own_email, "long-enough-password")
+        self.session_token = server.database.create_session(own["id"])
+        other_email = server.student_email(
+            server.name_tokens("سعيد سالم ناصر العبد")
+        )
+        server.database.register_user(other_email, "another-long-password")
+
+        invalid_names = (
+            "John Doe Name Here",
+            "محمد أحمد علي 123",
+            "محمد أحمد علي",
+            "محمد أحمد علي الحسن خامس",
+            "محمد أحمد علي @الحسن",
+        )
+        for name in invalid_names:
+            with self.subTest(name=name):
+                status, result, _ = self.request(
+                    "POST",
+                    "/api/account/name",
+                    {"fullName": name},
+                )
+                self.assertEqual(status, 400)
+                self.assertTrue(result["error"])
+
+        with patch.object(
+            server.USER_PROFILES, "get", return_value={"grade": "10"}
+        ), patch.object(server.USER_PROFILES, "set"):
+            status, result, _ = self.request(
+                "POST",
+                "/api/account/name",
+                {"fullName": "سعيد سالم ناصر العبد"},
+            )
+            self.assertEqual(status, 409)
+            self.assertIn("مستخدم", result["error"])
+
+            status, result, _ = self.request(
+                "POST",
+                "/api/account/name",
+                {"fullName": old_name},
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(result["fullName"], old_name)
+
+            new_name = "عمر خالد فهد الزعبي"
+            new_email = server.student_email(server.name_tokens(new_name))
+            status, result, _ = self.request(
+                "POST",
+                "/api/account/name",
+                {"fullName": new_name},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["fullName"], new_name)
+        self.assertIsNone(
+            server.database.login_user(own_email, "long-enough-password")
+        )
+        self.assertEqual(
+            server.database.login_user(new_email, "long-enough-password")["id"],
+            own["id"],
+        )
+        self.assertEqual(
+            server.database.get_session_user(self.session_token)["id"],
+            own["id"],
+        )
+
+    def test_student_can_update_phone_and_nonstudents_cannot(self):
+        email = server.student_email(
+            server.name_tokens("محمد أحمد علي الحسن")
+        )
+        student = server.database.register_user(email, "long-enough-password")
+        self.session_token = server.database.create_session(student["id"])
+
+        status, result, _ = self.request(
+            "POST",
+            "/api/account/phone",
+            {"phone": "079 123 4567"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["phone"], "+962791234567")
+        self.assertEqual(
+            server.database.get_student_account_profile(student["id"])["phone"],
+            "+962791234567",
+        )
+
+        status, result, _ = self.request(
+            "POST",
+            "/api/account/phone",
+            {"phone": "12345"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            server.database.get_student_account_profile(student["id"])["phone"],
+            "+962791234567",
+        )
+
+        self.session_token = server.database.create_session(self.user["id"])
+        status, _, _ = self.request(
+            "POST",
+            "/api/account/phone",
+            {"phone": "078 123 4567"},
+        )
+        self.assertEqual(status, 403)
+
+    def test_theme_preference_persists_and_logout_blocks_protected_pages(self):
+        previous_preferences = server.USER_PREFERENCES
+        server.USER_PREFERENCES = server.UserPreferences(
+            Path(self.temp_directory.name) / "preferences.json"
+        )
+        try:
+            status, result, _ = self.request(
+                "POST", "/api/preferences", {"theme": "dark"}
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(result["preferences"]["theme"], "dark")
+            status, result, _ = self.request("GET", "/api/preferences")
+            self.assertEqual(status, 200)
+            self.assertEqual(result["preferences"]["theme"], "dark")
+        finally:
+            server.USER_PREFERENCES = previous_preferences
+
+        status, _, headers = self.request("POST", "/api/logout")
+        self.assertEqual(status, 204)
+        self.assertIn("Max-Age=0", headers.get("Set-Cookie", ""))
+        status, _, _ = self.request("GET", "/api/me")
+        self.assertEqual(status, 401)
+        status, _, _ = self.request("GET", "/api/conversations")
+        self.assertEqual(status, 401)
+
+        for path in ("/", "/index.html", "/admin.html"):
+            with self.subTest(path=path):
+                request = Request(
+                    f"{self.base_url}{path}",
+                    headers={"Accept": "text/html"},
+                )
+                with urlopen(request) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertTrue(response.url.endswith("/login.html"))
+
     def test_non_student_cannot_read_or_update_student_profile(self):
         status, result, _ = self.request("GET", "/api/account/profile")
         self.assertEqual(status, 403)
@@ -1321,8 +1462,20 @@ class ChatApiTests(unittest.TestCase):
         other_token = server.database.create_session(self.user["id"])
         status, result = self.post(
             {
+                "currentPassword": "correct-horse-battery",
+                "newPassword": "brand-new-password",
+                "confirmPassword": "different-new-password",
+            },
+            path="/api/auth/change-password",
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("غير متطابقتين", result["error"])
+
+        status, result = self.post(
+            {
                 "currentPassword": "wrong-current-password",
                 "newPassword": "brand-new-password",
+                "confirmPassword": "brand-new-password",
             },
             path="/api/auth/change-password",
         )
@@ -1339,6 +1492,7 @@ class ChatApiTests(unittest.TestCase):
             {
                 "currentPassword": "correct-horse-battery",
                 "newPassword": "short",
+                "confirmPassword": "short",
             },
             path="/api/auth/change-password",
         )
@@ -1349,6 +1503,7 @@ class ChatApiTests(unittest.TestCase):
             {
                 "currentPassword": "correct-horse-battery",
                 "newPassword": "brand-new-password",
+                "confirmPassword": "brand-new-password",
             },
             path="/api/auth/change-password",
         )
@@ -1550,9 +1705,12 @@ class ChatApiTests(unittest.TestCase):
 
     def test_page_views_dedupe_refreshes_and_count_new_browsers(self):
         def open_page(path, visitor_cookie=None):
-            headers = {"Accept": "text/html"}
+            headers = {
+                "Accept": "text/html",
+                "Cookie": f"school_assistant_session={self.session_token}",
+            }
             if visitor_cookie:
-                headers["Cookie"] = visitor_cookie
+                headers["Cookie"] += f"; {visitor_cookie}"
             with urlopen(Request(f"{self.base_url}{path}", headers=headers)) as response:
                 self.assertEqual(response.status, 200)
                 set_cookie = response.headers.get("Set-Cookie")

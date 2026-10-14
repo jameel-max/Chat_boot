@@ -43,6 +43,139 @@
 .typing[data-state="creating"] .typing-icon b:nth-child(3) { top: 16px; width: 18px; animation-delay: .5s; }
 @keyframes act-write { 0% { transform: scaleX(0); } 55%, 80% { transform: scaleX(1); } 100% { transform: scaleX(1); opacity: .25; } }
 
+/* ===== صفحة إعدادات الحساب ===== */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: center;
+  overflow: auto;
+  padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+  background: var(--bg);
+}
+.settings-overlay.hidden { display: none; }
+.settings-panel { width: min(100%, 940px); min-height: 100%; }
+.settings-header {
+  display: flex;
+  min-height: 92px;
+  align-items: center;
+  gap: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-header > div { flex: 1; }
+.settings-header h1 { margin: 2px 0 0; font-size: clamp(22px, 4vw, 30px); }
+.settings-eyebrow { color: var(--muted); font-size: 12px; }
+.settings-logo { width: 44px; height: 44px; object-fit: contain; }
+.settings-back {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.settings-back:hover { background: var(--surface-hover); }
+.settings-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 24px 0; }
+.settings-card {
+  min-width: 0;
+  padding: clamp(16px, 3vw, 22px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 12px 30px #00000012;
+}
+.settings-card-heading { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+.settings-card-heading h2, .settings-logout-card h2 { margin: 0; font-size: 16px; }
+.settings-card-heading p, .settings-logout-card p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.settings-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  border: 1px solid #65d6c433;
+  border-radius: 12px;
+  background: #65d6c414;
+  color: var(--accent);
+  font-size: 20px;
+}
+.settings-form { display: grid; gap: 9px; }
+.settings-form label { margin-top: 4px; font-size: 12px; font-weight: 600; }
+.settings-form > input, .settings-form .password-field input {
+  min-width: 0;
+  min-height: 43px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.settings-form > input:focus, .settings-form .password-field input:focus { border-color: var(--accent); }
+.settings-form small { color: var(--muted); font-size: 11px; }
+.settings-form .password-field { gap: 7px; }
+.settings-form .password-field input { width: 100%; flex: 1; }
+.settings-submit {
+  min-height: 42px;
+  margin-top: 7px;
+  padding: 8px 15px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent);
+  color: #09201d;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.settings-submit:hover { filter: brightness(1.06); }
+.settings-submit:disabled { opacity: .55; cursor: wait; }
+.settings-message { min-height: 18px; margin: 9px 0 0; color: var(--accent); font-size: 12px; }
+.settings-message:empty { display: none; }
+.settings-message.error { color: #ef7772; }
+.settings-theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.settings-theme-option {
+  display: flex;
+  min-height: 62px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.settings-theme-option span { font-size: 20px; }
+.settings-theme-option[aria-pressed="true"] { border-color: var(--accent); background: #65d6c414; color: var(--accent); }
+.settings-logout-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-color: #ef6b6b44; }
+.settings-logout {
+  display: inline-flex;
+  min-height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid #ef6b6b66;
+  border-radius: 10px;
+  background: transparent;
+  color: #ef7772;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-logout:hover { background: #ef6b6b14; }
+.settings-logout svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+
 /* ===== الحصة اليومية للمرفقات ===== */
 .quota-row {
   display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
@@ -220,24 +353,18 @@ html[data-theme="light"] .convo-loader:not([data-photo-bg] *) {
 }
 @keyframes convo-fade { from { opacity: 0; } to { opacity: 1; } }
 
-/* ===== قائمة الإعدادات على الهاتف: تظهر كاملة فوق الشاشة ===== */
+/* ===== توافق الهاتف ===== */
 @media (max-width: 760px) {
   /* أي transform أو will-change على القائمة الجانبية يحبس العناصر fixed بداخلها ويقصّها؛
      نلغيهما وهي مفتوحة (القائمة المغلقة تحتاجهما للإخفاء فقط) */
   .sidebar.mobile-open { transform: none; will-change: auto; }
 
-  .profile-settings-menu {
-    position: fixed;
-    z-index: 30;
-    inset: auto 12px calc(12px + env(safe-area-inset-bottom, 0px)) 12px;
-    width: auto;
-    max-width: 420px;
-    margin: 0 auto;
-    max-height: min(70vh, 420px);
-    overflow-y: auto;
-    transform: none;
-    translate: none;
-  }
+  .settings-overlay { padding-inline: 14px; }
+  .settings-header { min-height: 78px; gap: 10px; }
+  .settings-back { padding-inline: 9px; }
+  .settings-content { grid-template-columns: minmax(0, 1fr); gap: 12px; padding-block: 14px; }
+  .settings-card { border-radius: 13px; }
+  .settings-logout-card { align-items: flex-start; flex-direction: column; }
 }
 
 /* الاسم الرباعي في القائمة الجانبية: يُقصّ بنقاط بدل أن يكسر التصميم */

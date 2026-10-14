@@ -7,6 +7,18 @@
   <meta name="robots" content="noindex, nofollow">
   <title>لوحة التحكم — فهيم</title>
   <link rel="icon" type="image/svg+xml" href="/school-logo.png">
+  <script>
+    try {
+      const theme = localStorage.getItem("faheem_theme");
+      document.documentElement.dataset.theme = theme === "light" || theme === "dark"
+        ? theme
+        : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    } catch {
+      document.documentElement.dataset.theme =
+        window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+  </script>
+  <link rel="stylesheet" href="/theme.css?v=4">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -449,6 +461,16 @@
       toast(error.message, true);
     }
 
+    async function loadThemePreference() {
+      const preference = await api("/api/preferences");
+      const theme = preference?.preferences?.theme;
+      if (theme !== "light" && theme !== "dark") return;
+      document.documentElement.dataset.theme = theme;
+      document.querySelector('meta[name="theme-color"]').content =
+        theme === "dark" ? "#101114" : "#ffffff";
+      try { localStorage.setItem("faheem_theme", theme); } catch {}
+    }
+
     function confirmAction(message, yesLabel = "نعم، تابع") {
       return new Promise((resolve) => {
         const dialog = $("confirm-dialog");
@@ -473,6 +495,7 @@
         const result = await api("/api/me");
         me = { ...result.user, isAdmin: result.isAdmin, isPrimaryAdmin: result.isPrimaryAdmin };
         if (!me.isAdmin) { showView("denied"); return; }
+        try { await loadThemePreference(); } catch (error) { handleError(error); }
         await openDashboard();
       } catch (error) {
         showView("login");
@@ -518,10 +541,17 @@
     });
 
     async function logout() {
-      try { await api("/api/logout", { method: "POST" }); } catch {}
+      try {
+        await api("/api/logout", { method: "POST" });
+      } catch (error) {
+        toast(error.message, true);
+        return;
+      }
       stopStats();
       me = null; allUsers = []; supportMessages = [];
-      showView("login");
+      try { localStorage.removeItem("faheem_logged_in_before"); } catch {}
+      try { sessionStorage.clear(); } catch {}
+      location.replace("/login.html");
     }
     $("logout-button").addEventListener("click", logout);
     $("denied-logout").addEventListener("click", logout);

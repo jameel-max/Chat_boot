@@ -1541,6 +1541,63 @@ class Database:
 
         return "updated"
 
+    def update_student_account_name(self, user_id, email, full_name):
+        email = email.strip().casefold()
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            user = connection.execute(
+                "SELECT id FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            if not user:
+                connection.rollback()
+                return "not_found"
+
+            duplicate = connection.execute(
+                """
+                SELECT 1
+                FROM users
+                WHERE lower(email) = lower(?)
+                  AND id != ?
+                """,
+                (email, user_id),
+            ).fetchone()
+            if duplicate:
+                connection.rollback()
+                return "duplicate"
+
+            connection.execute(
+                """
+                UPDATE users
+                SET email = ?,
+                    google_sub = ?,
+                    name = ?
+                WHERE id = ?
+                """,
+                (email, f"password:{email}", full_name, user_id),
+            )
+            connection.execute(
+                "DELETE FROM password_reset_codes WHERE user_id = ?",
+                (user_id,),
+            )
+
+        return "updated"
+
+    def update_student_account_phone(self, user_id, phone):
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE users
+                SET phone = ?
+                WHERE id = ?
+                """,
+                (phone, user_id),
+            )
+            if cursor.rowcount != 1:
+                return "not_found"
+        return "updated"
+
     def get_student_preferences(
         self,
         user_id,

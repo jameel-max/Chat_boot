@@ -83,16 +83,13 @@ ALLOWED_DOCUMENT_EXTENSIONS = {
 database = None
 _database_lock = threading.Lock()
 
+
 SYSTEM_INSTRUCTION = " ".join(
     (
         "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين.",
-        "أجب باللهجة الأردنية الطبيعية وبأسلوب واضح ومناسب للطلاب.",
-        "اترك سطرًا فارغًا بين الفقرات، واكتب كل عنصر في سطر مستقل، ولا تجمع عنصرين في السطر نفسه.",
-        "استخدم عناوين Markdown قصيرة وواضحة، وضع الشيفرات متعددة الأسطر في كتلة Markdown.",
-        "استخدم عناصر HTML الهيكلية <table> للجداول عندما يكون الجدول مفيدًا فعلًا،",
-        "ولا تستخدم صيغة Markdown ذات | للجداول، ولا تكتب وسوم HTML في النص العادي.",
-        "ولا تضعهما في جدول إلا إذا كان الجدول مفيدًا فعلًا.",
-        "تجنب LaTeX المعقد، ولا تكتب وسوم HTML.",
+        "اترك سطرًا فارغًا بين الفقرات، واستخدم عناوين Markdown قصيرة عند الحاجة.",
+        "استخدم الجداول فقط عندما تكون مفيدة فعلًا.",
+        "تجنب التكرار والمقدمات الطويلة، ونفّذ طلب الطالب مباشرة دون أسئلة غير ضرورية.",
     )
 )
 
@@ -675,15 +672,17 @@ class UserPreferences:
             entry = self.data.get(str(user_id))
             if not isinstance(entry, dict):
                 entry = {}
-            entry["theme"] = theme
-            self.data[str(user_id)] = entry
+            updated_entry = {**entry, "theme": theme}
+            updated_data = {**self.data, str(user_id): updated_entry}
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 temporary = self.path.with_suffix(".tmp")
-                temporary.write_text(json.dumps(self.data), encoding="utf-8")
+                temporary.write_text(json.dumps(updated_data), encoding="utf-8")
                 temporary.replace(self.path)
             except OSError as error:
                 print(f"[PREFS] تعذّر حفظ التفضيلات: {error}", flush=True)
+                raise
+            self.data = updated_data
             return {"theme": theme}
 
 
@@ -740,6 +739,23 @@ def validate_full_name(raw):
         return None, "تأكد من كتابة كل اسم بشكل صحيح."
     if len(set(tokens)) < 2:
         return None, "اكتب اسمك الحقيقي الرباعي."
+    return display, None
+
+
+def validate_account_name(raw):
+    """يتحقق من اسم حساب عربي يتكون من أربع كلمات مفصولة بمسافات."""
+    if not isinstance(raw, str):
+        return None, "اكتب اسمك الرباعي."
+    display = _ARABIC_MARKS.sub("", re.sub(r"\s+", " ", raw).strip())
+    normalized = normalize_arabic(display)
+    if not display:
+        return None, "اكتب اسمك الرباعي."
+    if len(display) > 80:
+        return None, "الاسم طويل جدًا. اكتب اسمك الرباعي فقط."
+    if not re.fullmatch(r"[\u0621-\u064a]+(?: [\u0621-\u064a]+){3}", normalized):
+        return None, "اكتب أربعة أسماء باللغة العربية فقط، دون أرقام أو رموز."
+    if any(len(word) < 2 or len(word) > 30 for word in normalized.split()):
+        return None, "تأكد من كتابة كل اسم بشكل صحيح."
     return display, None
 
 
@@ -1105,6 +1121,19 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.page_visitor_token(), dedup_seconds=VISIT_DEDUP_SECONDS
             )
         user = self.current_user()
+        if page_path in {"/", "/index.html", "/admin.html"}:
+            if not user:
+                self.send_response(303)
+                self.send_header("Location", "/login.html")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            if page_path == "/admin.html" and not self.is_admin(user):
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
         if self.path == "/api/me":
             if not user:
                 self.send_json({"error": "سجّل الدخول للمتابعة."}, 401)
@@ -1339,6 +1368,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if self.path == "/api/account/profile":
             self.account_profile()
             return
+        if self.path == "/api/account/name":
+            self.change_account_name()
+            return
+        if self.path == "/api/account/phone":
+            self.change_account_phone()
+            return
         if self.path == "/api/support-messages":
             self.submit_support_message()
             return
@@ -1359,7 +1394,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         if self.path == "/api/logout":
             token = self.session_token()
-            get_database().delete_session(token)
+            try:
+                get_database().delete_session(token)
+            except Database.error_types:
+                self.send_json({"error": "تعذّر إنهاء الجلسة. حاول مرة أخرى."}, 500)
+                return
             self.send_response(204)
             self.send_header(
                 "Set-Cookie",
@@ -2308,16 +2347,23 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         current_password = payload.get("currentPassword")
         new_password = payload.get("newPassword")
-        if not isinstance(current_password, str) or not isinstance(
-            new_password, str
+        confirm_password = payload.get("confirmPassword")
+        if (
+            not isinstance(current_password, str)
+            or not isinstance(new_password, str)
+            or not isinstance(confirm_password, str)
         ):
-            self.send_json({"error": "أدخل كلمة المرور الحالية والجديدة."}, 400)
+            self.send_json(
+                {"error": "أدخل كلمة المرور الحالية والجديدة وأعد تأكيدها."}, 400
+            )
             return
         if (
             not current_password
             or len(current_password) > 128
             or not new_password
             or len(new_password) > 128
+            or not confirm_password
+            or len(confirm_password) > 128
         ):
             self.send_json({"error": "كلمة المرور غير صالحة."}, 400)
             return
@@ -2326,6 +2372,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             new_password.encode("utf-8")
         except UnicodeEncodeError:
             self.send_json({"error": "استخدم أحرفًا صالحة في كلمة المرور."}, 400)
+            return
+        if new_password != confirm_password:
+            self.send_json(
+                {"error": "كلمتا المرور الجديدتان غير متطابقتين."}, 400
+            )
             return
         if len(new_password) < 10:
             self.send_json(
@@ -2490,7 +2541,84 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if theme not in ALLOWED_THEMES:
             self.send_json({"error": "المظهر غير صالح."}, 400)
             return
-        self.send_json({"preferences": USER_PREFERENCES.set_theme(user["id"], theme)})
+        try:
+            preferences = USER_PREFERENCES.set_theme(user["id"], theme)
+        except OSError:
+            self.send_json({"error": "تعذّر حفظ المظهر. حاول مرة أخرى."}, 500)
+            return
+        self.send_json({"preferences": preferences})
+
+    def change_account_name(self):
+        user = self.current_user()
+        if not user:
+            self.send_unauthorized()
+            return
+        if not student_name_from_email(user.get("email", "")):
+            self.send_json(
+                {"error": "تغيير الاسم متاح لحسابات الطلاب فقط."}, 403
+            )
+            return
+        payload = self.read_json_body()
+        if payload is None:
+            return
+        full_name, error = validate_account_name(payload.get("fullName"))
+        if error:
+            self.send_json({"error": error}, 400)
+            return
+
+        email = student_email(name_tokens(full_name))
+        try:
+            result = get_database().update_student_account_name(
+                user["id"], email, full_name
+            )
+        except Database.integrity_error_types:
+            result = "duplicate"
+        except Database.error_types:
+            self.send_json({"error": "تعذّر حفظ الاسم الجديد."}, 500)
+            return
+
+        if result == "duplicate":
+            self.send_json(
+                {"error": "هذا الاسم مستخدم لحساب آخر. اختر اسمًا مختلفًا."}, 409
+            )
+            return
+        if result == "not_found":
+            self.send_json({"error": "الحساب غير موجود."}, 404)
+            return
+
+        saved_profile = USER_PROFILES.get(user["id"]) or {}
+        USER_PROFILES.set(user["id"], full_name, saved_profile.get("grade", ""))
+        self.send_json({"ok": True, "fullName": full_name})
+
+    def change_account_phone(self):
+        user = self.current_user()
+        if not user:
+            self.send_unauthorized()
+            return
+        if not student_name_from_email(user.get("email", "")):
+            self.send_json(
+                {"error": "تغيير رقم الهاتف متاح لحسابات الطلاب فقط."}, 403
+            )
+            return
+        payload = self.read_json_body()
+        if payload is None:
+            return
+        phone, error = normalize_phone_number(payload.get("phone"))
+        if error:
+            self.send_json({"error": error}, 400)
+            return
+
+        try:
+            result = get_database().update_student_account_phone(
+                user["id"], phone
+            )
+        except Database.error_types:
+            self.send_json({"error": "تعذّر حفظ رقم الهاتف."}, 500)
+            return
+        if result == "not_found":
+            self.send_json({"error": "الحساب غير موجود."}, 404)
+            return
+        self.send_json({"ok": True, "phone": phone})
 
     def account_profile(self, user=None):
         if user is None:

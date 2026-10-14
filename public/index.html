@@ -14,10 +14,10 @@
     <script>try{var t=localStorage.getItem("faheem_theme"),d=t==="dark"||t==="light"?t:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=d;document.querySelector('meta[name="theme-color"]').content=d==="dark"?"#101114":"#ffffff"}catch(e){document.documentElement.dataset.theme=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}</script>
     <script>try{if(!localStorage.getItem("faheem_logged_in_before"))location.replace("/login.html")}catch(e){}</script>
     <link rel="stylesheet" href="/style.css?v=24">
-    <link rel="stylesheet" href="/extras.css?v=7">
+    <link rel="stylesheet" href="/extras.css?v=8">
     <link rel="stylesheet" href="/theme.css?v=4">
     <script>try{if(localStorage.getItem("faheem_sidebar_collapsed")==="1")document.documentElement.classList.add("sidebar-collapsed")}catch(e){}</script>
-    <script src="/app.js?v=51" defer></script>
+    <script src="/app.js?v=53" defer></script>
   </head>
   <body>
     <div class="app-loader" id="app-loader" role="status" aria-live="polite" aria-label="جارٍ التحميل">
@@ -66,18 +66,9 @@
           <div class="sidebar-avatar" id="user-avatar-fallback">ف</div>
           <div class="profile-copy"><strong id="profile-name">مساحتك الخاصة</strong></div>
           <div class="profile-settings hidden" id="profile-settings">
-            <button class="profile-settings-toggle" id="profile-settings-toggle" type="button" aria-label="إعدادات الحساب" aria-expanded="false" aria-controls="profile-settings-menu" title="إعدادات الحساب">
+            <button class="profile-settings-toggle" id="profile-settings-toggle" type="button" aria-label="الإعدادات" title="الإعدادات">
               <img src="settings-svgrepo-com.svg" alt="">
             </button>
-            <div class="profile-settings-menu hidden" id="profile-settings-menu">
-              <div class="theme-switch" role="group" aria-label="المظهر">
-                <button class="theme-option" type="button" data-theme-option="light" aria-pressed="true">☀️ فاتح</button>
-                <button class="theme-option" type="button" data-theme-option="dark" aria-pressed="false">🌙 داكن</button>
-              </div>
-              <button class="profile-settings-action hidden" id="edit-profile-button" type="button">بيانات الحساب</button>
-              <button class="profile-settings-action" id="change-password-button" type="button">تغيير كلمة المرور</button>
-              <button class="profile-settings-action" id="logout-button" type="button">خروج</button>
-            </div>
           </div>
         </div>
       </aside>
@@ -145,56 +136,63 @@
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
       </section>
     </main>
-    <section class="auth-overlay account-overlay hidden" id="password-overlay" aria-labelledby="password-title">
-      <div class="auth-card">
-        <img class="welcome-logo" src="/school-logo.png" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
-        <h1 id="password-title">تغيير كلمة المرور</h1>
-        <p>أدخل كلمة المرور الحالية، ثم اختر كلمة مرور جديدة من 10 أحرف على الأقل.</p>
-        <form class="auth-form" id="change-password-form">
-          <label for="current-password">كلمة المرور الحالية</label>
-          <div class="password-field">
-            <input id="current-password" type="password" autocomplete="current-password" required maxlength="128">
-            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
-          </div>
-          <label for="new-password">كلمة المرور الجديدة</label>
-          <div class="password-field">
-            <input id="new-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
-            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
-          </div>
-          <label for="confirm-password">تأكيد كلمة المرور الجديدة</label>
-          <div class="password-field">
-            <input id="confirm-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
-            <button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
-          </div>
-          <button class="auth-submit" id="change-password-submit" type="submit">حفظ كلمة المرور</button>
-        </form>
-        <button class="auth-mode-toggle" id="cancel-password-change" type="button">إلغاء</button>
-        <p class="auth-error" id="password-error" role="alert"></p>
-      </div>
-    </section>
-    <section class="auth-overlay account-overlay hidden" id="profile-overlay" aria-labelledby="profile-title">
-      <div class="auth-card">
-        <img class="welcome-logo" src="/school-logo.png" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
-        <h1 id="profile-title">بيانات الحساب</h1>
-        <p>عدّل اسمك أو رقم هاتفك أو صفك. ستستخدم الاسم الجديد لتسجيل الدخول لاحقًا.</p>
-        <form class="auth-form" id="profile-form">
-          <label for="profile-full-name">الاسم الرباعي</label>
-          <input id="profile-full-name" type="text" autocomplete="name" maxlength="80" required>
-          <label for="profile-phone">رقم الهاتف الأردني</label>
-          <input id="profile-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" dir="ltr" required placeholder="079 123 4567 أو +962 79 123 4567">
-          <label for="profile-grade">الصف الدراسي</label>
-          <select id="profile-grade" required>
-            <option value="">اختر صفك</option>
-            <option value="8">الثامن</option>
-            <option value="9">التاسع</option>
-            <option value="10">العاشر</option>
-            <option value="11">الأول الثانوي</option>
-            <option value="12">الثاني الثانوي</option>
-          </select>
-          <button class="auth-submit" id="profile-submit" type="submit">حفظ التغييرات</button>
-        </form>
-        <button class="auth-mode-toggle" id="close-profile" type="button">إلغاء</button>
-        <p class="auth-error" id="profile-error" role="alert"></p>
+    <section class="settings-overlay hidden" id="settings-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="settings-panel">
+        <header class="settings-header">
+          <button class="settings-back" id="close-settings" type="button" aria-label="إغلاق الإعدادات">→ <span>رجوع</span></button>
+          <div><span class="settings-eyebrow">مساحتك في فهيم</span><h1 id="settings-title">الإعدادات</h1></div>
+          <img src="/school-logo.png" alt="" class="settings-logo">
+        </header>
+        <div class="settings-content">
+          <section class="settings-card" id="username-settings">
+            <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">◉</span><div><h2>اسم المستخدم</h2><p>استخدم اسمك العربي الرباعي لتسجيل الدخول والتعرّف عليك.</p></div></div>
+            <form class="settings-form" id="username-form">
+              <label for="username-input">الاسم الجديد</label>
+              <input id="username-input" type="text" autocomplete="name" maxlength="80" required placeholder="الاسم، اسم الأب، اسم الجد، العائلة">
+              <small>أربعة أسماء عربية، دون أرقام أو رموز.</small>
+              <button class="settings-submit" id="username-submit" type="submit">حفظ الاسم</button>
+            </form>
+            <p class="settings-message" id="username-message" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="settings-card" id="phone-settings">
+            <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">⌕</span><div><h2>رقم الهاتف</h2><p>حدّث رقم هاتفك الأردني المرتبط بحسابك.</p></div></div>
+            <form class="settings-form" id="phone-form">
+              <label for="phone-input">رقم الهاتف الجديد</label>
+              <input id="phone-input" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" dir="ltr" required placeholder="079 123 4567 أو +962 79 123 4567">
+              <small>يُقبل الرقم الأردني بصيغة 077 أو 078 أو 079.</small>
+              <button class="settings-submit" id="phone-submit" type="submit">حفظ رقم الهاتف</button>
+            </form>
+            <p class="settings-message" id="phone-message" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="settings-card">
+            <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">◐</span><div><h2>المظهر</h2><p>اختر المظهر المريح لك، وسيُحفظ على حسابك.</p></div></div>
+            <div class="settings-theme-options" role="group" aria-label="اختيار المظهر">
+              <button class="settings-theme-option" type="button" data-theme-option="light" aria-pressed="false"><span aria-hidden="true">☀</span> فاتح</button>
+              <button class="settings-theme-option" type="button" data-theme-option="dark" aria-pressed="false"><span aria-hidden="true">☾</span> داكن</button>
+            </div>
+          </section>
+
+          <section class="settings-card">
+            <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">⌑</span><div><h2>تغيير كلمة المرور</h2><p>اختر كلمة مرور جديدة لا تقل عن 10 أحرف.</p></div></div>
+            <form class="settings-form" id="change-password-form">
+              <label for="current-password">كلمة المرور الحالية</label>
+              <div class="password-field"><input id="current-password" type="password" autocomplete="current-password" required maxlength="128"><button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button></div>
+              <label for="new-password">كلمة المرور الجديدة</label>
+              <div class="password-field"><input id="new-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128"><button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button></div>
+              <label for="confirm-password">تأكيد كلمة المرور الجديدة</label>
+              <div class="password-field"><input id="confirm-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128"><button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button></div>
+              <button class="settings-submit" id="change-password-submit" type="submit">حفظ كلمة المرور</button>
+            </form>
+            <p class="settings-message" id="password-error" role="alert" aria-live="polite"></p>
+          </section>
+
+          <section class="settings-card settings-logout-card">
+            <div><h2>تسجيل الخروج</h2><p>إنهاء الجلسة على هذا الجهاز.</p></div>
+            <button class="settings-logout" id="logout-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5m5 5H3m9-9h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"></path></svg> تسجيل الخروج</button>
+          </section>
+        </div>
       </div>
     </section>
     <section class="auth-overlay account-overlay hidden" id="help-center-overlay" aria-labelledby="help-center-title">

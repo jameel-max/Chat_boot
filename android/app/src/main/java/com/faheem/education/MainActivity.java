@@ -11,6 +11,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -71,7 +72,7 @@ public final class MainActivity extends ComponentActivity {
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                goBackOrFinish();
+                handleApplicationBack();
             }
         });
 
@@ -137,6 +138,52 @@ public final class MainActivity extends ComponentActivity {
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setWebViewClient(new FaheemWebViewClient());
         webView.setWebChromeClient(new FaheemWebChromeClient());
+        webView.addJavascriptInterface(new ThemeBridge(), "FaheemAndroid");
+    }
+
+    private void handleApplicationBack() {
+        if (webView == null || webView.getVisibility() != View.VISIBLE) {
+            goBackOrFinish();
+            return;
+        }
+        webView.evaluateJavascript(
+                "(function(){"
+                        + "const overlay=document.querySelector("
+                        + "'.settings-overlay:not(.hidden),.auth-overlay:not(.hidden)');"
+                        + "const sidebar=document.querySelector('.sidebar.mobile-open');"
+                        + "if(!overlay&&!sidebar)return false;"
+                        + "document.dispatchEvent(new KeyboardEvent('keydown',"
+                        + "{key:'Escape',bubbles:true}));return true;"
+                        + "})()",
+                handled -> {
+                    if (!"true".equals(handled)) {
+                        goBackOrFinish();
+                    }
+                }
+        );
+    }
+
+    private void applySystemTheme(String theme) {
+        boolean dark = "dark".equals(theme);
+        int color = Color.parseColor(dark ? "#101114" : "#ffffff");
+        runOnUiThread(() -> {
+            Window window = getWindow();
+            window.setStatusBarColor(color);
+            window.setNavigationBarColor(color);
+            WindowInsetsControllerCompat controller =
+                    WindowCompat.getInsetsController(window, window.getDecorView());
+            controller.setAppearanceLightStatusBars(!dark);
+            controller.setAppearanceLightNavigationBars(!dark);
+        });
+    }
+
+    private final class ThemeBridge {
+        @JavascriptInterface
+        public void setTheme(String theme) {
+            if ("light".equals(theme) || "dark".equals(theme)) {
+                applySystemTheme(theme);
+            }
+        }
     }
 
     private void loadFaheem() {
@@ -353,6 +400,18 @@ public final class MainActivity extends ComponentActivity {
             loadingProgress.setVisibility(View.GONE);
             errorPanel.setVisibility(View.GONE);
             CookieManager.getInstance().flush();
+            if (sameServerOrigin(Uri.parse(url))) {
+                view.evaluateJavascript(
+                        "(function(){"
+                                + "const sync=()=>window.FaheemAndroid.setTheme("
+                                + "document.documentElement.dataset.theme||'light');"
+                                + "sync();new MutationObserver(sync).observe("
+                                + "document.documentElement,{attributes:true,"
+                                + "attributeFilter:['data-theme']});"
+                                + "})()",
+                        null
+                );
+            }
         }
 
         @Override
