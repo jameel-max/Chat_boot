@@ -36,7 +36,18 @@ const helpError = document.querySelector("#help-error");
 const profileName = document.querySelector("#profile-name");
 const profileSettings = document.querySelector("#profile-settings");
 const profileSettingsToggle = document.querySelector("#profile-settings-toggle");
-const profileSettingsMenu = document.querySelector("#profile-settings-menu");
+const settingsOverlay = document.querySelector("#settings-overlay");
+const closeSettingsButton = document.querySelector("#close-settings");
+const usernameSettings = document.querySelector("#username-settings");
+const usernameForm = document.querySelector("#username-form");
+const usernameInput = document.querySelector("#username-input");
+const usernameSubmit = document.querySelector("#username-submit");
+const usernameMessage = document.querySelector("#username-message");
+const phoneSettings = document.querySelector("#phone-settings");
+const phoneForm = document.querySelector("#phone-form");
+const phoneInput = document.querySelector("#phone-input");
+const phoneSubmit = document.querySelector("#phone-submit");
+const phoneMessage = document.querySelector("#phone-message");
 const userAvatar = document.querySelector("#user-avatar");
 const userAvatarFallback = document.querySelector("#user-avatar-fallback");
 const logoutButton = document.querySelector("#logout-button");
@@ -65,8 +76,6 @@ const adminNewPassword = document.querySelector("#admin-new-password");
 const adminConfirmPassword = document.querySelector("#admin-confirm-password");
 const adminPasswordSubmit = document.querySelector("#admin-password-submit");
 const adminPasswordError = document.querySelector("#admin-password-error");
-const changePasswordButton = document.querySelector("#change-password-button");
-const passwordOverlay = document.querySelector("#password-overlay");
 const changePasswordForm = document.querySelector("#change-password-form");
 const currentPasswordInput = document.querySelector("#current-password");
 const newPasswordInput = document.querySelector("#new-password");
@@ -531,7 +540,7 @@ const touchDevice = window.matchMedia("(pointer: coarse)");
 function focusInputAuto() {
   if (touchDevice.matches || input.disabled) return;
   const blocked = document.querySelector(
-    ".auth-overlay:not(.hidden):not(#auth-overlay)",
+    ".auth-overlay:not(.hidden):not(#auth-overlay), .settings-overlay:not(.hidden)",
   );
   if (blocked) return;
   input.focus({ preventScroll: true });
@@ -1267,10 +1276,12 @@ function redirectToLogin(reason = "") {
 function setAuthenticated(user, isAdmin = false, isPrimaryAdmin = false) {
   currentUser = { ...user, isAdmin, isPrimaryAdmin };
   profileName.textContent = user.name;
+  usernameSettings.classList.toggle("hidden", !user.isStudentAccount);
+  phoneSettings.classList.toggle("hidden", !user.isStudentAccount);
+  usernameInput.value = user.name || "";
   helpCenterButton.classList.remove("hidden");
   profileSettings.classList.remove("hidden");
   logoutButton.classList.remove("hidden");
-  changePasswordButton.classList.remove("hidden");
   adminButton.classList.toggle("hidden", !isAdmin);
   userAvatarFallback.classList.add("hidden");
   if (user.picture) {
@@ -1881,6 +1892,7 @@ function ensureUploadAllowed() {
 const THEME_KEY = "faheem_theme";
 const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
 let savedTheme = null;
+let themeSaveSequence = 0;
 try {
   const storedTheme = localStorage.getItem(THEME_KEY);
   if (storedTheme === "light" || storedTheme === "dark") savedTheme = storedTheme;
@@ -1892,6 +1904,7 @@ let hasSavedThemePreference = Boolean(savedTheme);
 const themeButtons = document.querySelectorAll("[data-theme-option]");
 
 function applyTheme(theme, { save = false } = {}) {
+  const previousTheme = document.documentElement.dataset.theme || "light";
   const value = theme === "dark" ? "dark" : "light";
   document.documentElement.dataset.theme = value;
   document
@@ -1907,12 +1920,27 @@ function applyTheme(theme, { save = false } = {}) {
     } catch {
       // التخزين غير متاح
     }
-    fetch("/api/preferences", {
+    persistThemePreference(value, previousTheme, ++themeSaveSequence);
+  }
+}
+
+async function persistThemePreference(theme, previousTheme, requestSequence) {
+  try {
+    await apiRequest("/api/preferences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ theme: value }),
-    }).catch(() => {});
+      body: JSON.stringify({ theme }),
+    });
+  } catch (error) {
+    if (requestSequence === themeSaveSequence) {
+      applyTheme(previousTheme);
+      try {
+        localStorage.setItem(THEME_KEY, previousTheme);
+      } catch {
+        // التخزين غير متاح
+      }
+    }
+    showToast(`تعذّر حفظ المظهر: ${error.message}`);
   }
 }
 
@@ -1969,7 +1997,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (touchDevice.matches || input.disabled) return;
-  if (document.querySelector(".auth-overlay:not(.hidden)")) return;
+  if (document.querySelector(".auth-overlay:not(.hidden), .settings-overlay:not(.hidden)")) return;
   input.focus({ preventScroll: true });
 });
 
@@ -2328,10 +2356,23 @@ function resetChat() {
 setupSpeechRecognition();
 initializeApp();
 
-function closePasswordOverlay() {
-  passwordOverlay.classList.add("hidden");
-  changePasswordForm.reset();
+function closeSettings() {
+  settingsOverlay.classList.add("hidden");
+  resetPasswordForm();
   passwordError.textContent = "";
+  usernameMessage.textContent = "";
+  phoneMessage.textContent = "";
+}
+
+function resetPasswordForm() {
+  changePasswordForm.reset();
+  for (const button of changePasswordForm.querySelectorAll(".password-toggle")) {
+    const passwordInput = button.closest(".password-field")?.querySelector("input");
+    if (passwordInput) passwordInput.type = "password";
+    button.textContent = "إظهار";
+    button.setAttribute("aria-label", "إظهار كلمة المرور");
+    button.setAttribute("aria-pressed", "false");
+  }
 }
 
 document.querySelectorAll(".password-toggle").forEach((button) => {
@@ -2346,13 +2387,6 @@ document.querySelectorAll(".password-toggle").forEach((button) => {
     button.setAttribute("aria-pressed", String(isVisible));
   });
 });
-changePasswordButton.addEventListener("click", () => {
-  setProfileSettingsOpen(false);
-  passwordError.textContent = "";
-  passwordOverlay.classList.remove("hidden");
-  currentPasswordInput.focus();
-});
-
 function closeHelpCenter() {
   helpCenterOverlay.classList.add("hidden");
   helpError.textContent = "";
@@ -2425,30 +2459,63 @@ helpCenterForm.addEventListener("submit", async (event) => {
   }
 });
 
-function setProfileSettingsOpen(open) {
-  profileSettingsMenu.classList.toggle("hidden", !open);
-  profileSettingsToggle.setAttribute("aria-expanded", String(open));
-}
-
 profileSettingsToggle.addEventListener("click", () => {
-  setProfileSettingsOpen(profileSettingsToggle.getAttribute("aria-expanded") !== "true");
+  usernameMessage.textContent = "";
+  settingsOverlay.classList.remove("hidden");
+  if (!usernameSettings.classList.contains("hidden")) usernameInput.focus();
+  else currentPasswordInput.focus();
 });
-
-document.addEventListener("click", (event) => {
-  if (!profileSettings.contains(event.target)) setProfileSettingsOpen(false);
-});
-
+closeSettingsButton.addEventListener("click", closeSettings);
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") setProfileSettingsOpen(false);
+  if (event.key === "Escape" && !settingsOverlay.classList.contains("hidden")) {
+    closeSettings();
+  }
 });
 
-document.querySelector("#cancel-password-change").addEventListener("click", closePasswordOverlay);
-passwordOverlay.addEventListener("click", (event) => {
-  if (event.target === passwordOverlay) closePasswordOverlay();
+usernameForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!usernameForm.reportValidity()) return;
+  usernameMessage.classList.remove("error");
+  usernameMessage.textContent = "";
+  usernameSubmit.disabled = true;
+  try {
+    const result = await apiRequest("/api/account/name", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fullName: usernameInput.value }),
+    });
+    currentUser.name = result.fullName;
+    profileName.textContent = result.fullName;
+    userAvatarFallback.textContent = result.fullName.slice(0, 1);
+    usernameInput.value = result.fullName;
+    usernameMessage.textContent = "تم تحديث اسم المستخدم بنجاح.";
+  } catch (error) {
+    usernameMessage.classList.add("error");
+    usernameMessage.textContent = error.message;
+  } finally {
+    usernameSubmit.disabled = false;
+  }
 });
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !passwordOverlay.classList.contains("hidden")) {
-    closePasswordOverlay();
+
+phoneForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!phoneForm.reportValidity()) return;
+  phoneMessage.classList.remove("error");
+  phoneMessage.textContent = "";
+  phoneSubmit.disabled = true;
+  try {
+    const result = await apiRequest("/api/account/phone", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: phoneInput.value }),
+    });
+    phoneInput.value = result.phone;
+    phoneMessage.textContent = "تم تحديث رقم الهاتف بنجاح.";
+  } catch (error) {
+    phoneMessage.classList.add("error");
+    phoneMessage.textContent = error.message;
+  } finally {
+    phoneSubmit.disabled = false;
   }
 });
 
@@ -2470,9 +2537,11 @@ changePasswordForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({
         currentPassword: currentPasswordInput.value,
         newPassword: newPasswordInput.value,
+        confirmPassword: confirmPasswordInput.value,
       }),
     });
-    closePasswordOverlay();
+    resetPasswordForm();
+    passwordError.textContent = "تم تغيير كلمة المرور بنجاح. أُنهيت جلساتك على الأجهزة الأخرى.";
     showToast("تم تغيير كلمة المرور وتسجيل الخروج من الأجهزة الأخرى.");
   } catch (error) {
     passwordError.textContent = error.message;
@@ -2497,13 +2566,22 @@ logoutButton.addEventListener("click", async () => {
     helpCenterButton.classList.add("hidden");
     logoutButton.classList.add("hidden");
     profileSettings.classList.add("hidden");
-    setProfileSettingsOpen(false);
+    settingsOverlay.classList.add("hidden");
     adminButton.classList.add("hidden");
-    changePasswordButton.classList.add("hidden");
-    closePasswordOverlay();
+    closeSettings();
     userAvatar.classList.add("hidden");
     userAvatarFallback.textContent = "ف";
     userAvatarFallback.classList.remove("hidden");
+    try {
+      localStorage.removeItem(LOGGED_IN_BEFORE_KEY);
+    } catch {
+      // التخزين غير متاح
+    }
+    try {
+      sessionStorage.clear();
+    } catch {
+      // التخزين غير متاح
+    }
     window.location.replace("/login.html");
   } catch (error) {
     showToast(error.message);
