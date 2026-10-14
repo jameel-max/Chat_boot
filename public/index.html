@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="/extras.css?v=7">
     <link rel="stylesheet" href="/theme.css?v=4">
     <script>try{if(localStorage.getItem("faheem_sidebar_collapsed")==="1")document.documentElement.classList.add("sidebar-collapsed")}catch(e){}</script>
-    <script src="/app.js?v=50" defer></script>
+    <script src="/app.js?v=51" defer></script>
   </head>
   <body>
     <div class="app-loader" id="app-loader" role="status" aria-live="polite" aria-label="جارٍ التحميل">
@@ -74,6 +74,7 @@
                 <button class="theme-option" type="button" data-theme-option="light" aria-pressed="true">☀️ فاتح</button>
                 <button class="theme-option" type="button" data-theme-option="dark" aria-pressed="false">🌙 داكن</button>
               </div>
+              <button class="profile-settings-action hidden" id="edit-profile-button" type="button">بيانات الحساب</button>
               <button class="profile-settings-action" id="change-password-button" type="button">تغيير كلمة المرور</button>
               <button class="profile-settings-action" id="logout-button" type="button">خروج</button>
             </div>
@@ -169,6 +170,31 @@
         </form>
         <button class="auth-mode-toggle" id="cancel-password-change" type="button">إلغاء</button>
         <p class="auth-error" id="password-error" role="alert"></p>
+      </div>
+    </section>
+    <section class="auth-overlay account-overlay hidden" id="profile-overlay" aria-labelledby="profile-title">
+      <div class="auth-card">
+        <img class="welcome-logo" src="/school-logo.png" alt="شعار مدرسة خريبة السوق الثانوية الثانية للبنين">
+        <h1 id="profile-title">بيانات الحساب</h1>
+        <p>عدّل اسمك أو رقم هاتفك أو صفك. ستستخدم الاسم الجديد لتسجيل الدخول لاحقًا.</p>
+        <form class="auth-form" id="profile-form">
+          <label for="profile-full-name">الاسم الرباعي</label>
+          <input id="profile-full-name" type="text" autocomplete="name" maxlength="80" required>
+          <label for="profile-phone">رقم الهاتف الأردني</label>
+          <input id="profile-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" dir="ltr" required placeholder="079 123 4567 أو +962 79 123 4567">
+          <label for="profile-grade">الصف الدراسي</label>
+          <select id="profile-grade" required>
+            <option value="">اختر صفك</option>
+            <option value="8">الثامن</option>
+            <option value="9">التاسع</option>
+            <option value="10">العاشر</option>
+            <option value="11">الأول الثانوي</option>
+            <option value="12">الثاني الثانوي</option>
+          </select>
+          <button class="auth-submit" id="profile-submit" type="submit">حفظ التغييرات</button>
+        </form>
+        <button class="auth-mode-toggle" id="close-profile" type="button">إلغاء</button>
+        <p class="auth-error" id="profile-error" role="alert"></p>
       </div>
     </section>
     <section class="auth-overlay account-overlay hidden" id="help-center-overlay" aria-labelledby="help-center-title">

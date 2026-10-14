@@ -1,55 +1,61 @@
+
 <!doctype html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>فهيم — تسجيل الدخول</title>
+  <title>فهيم — إنشاء حساب</title>
   <meta name="theme-color" content="#ffffff">
   <meta name="robots" content="noindex">
   <link rel="icon" href="/school-logo.png">
   <link rel="preload" as="image" href="/loader-robot.webp" type="image/webp">
+
   <script>
     (function () {
-      var root = document.documentElement;
+      const root = document.documentElement;
       try {
-        var savedTheme = localStorage.getItem("faheem_theme");
-        var systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-        var theme = savedTheme === "dark" || savedTheme === "light"
+        const savedTheme = localStorage.getItem("faheem_theme");
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const theme = savedTheme === "dark" || savedTheme === "light"
           ? savedTheme
-          : systemPrefersDark ? "dark" : "light";
+          : prefersDark ? "dark" : "light";
+
         root.dataset.theme = theme;
         document.querySelector('meta[name="theme-color"]').content =
           theme === "dark" ? "#101114" : "#ffffff";
-        // من سبق أن سجّل دخوله غالبًا لديه جلسة: نُخفي الصفحة لحظة التحقق لنتجنب وميض النموذج
-        if (localStorage.getItem("faheem_logged_in_before")) root.classList.add("checking");
-      } catch (e) {
-        root.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches
-          ? "dark"
-          : "light";
+
+        if (localStorage.getItem("faheem_logged_in_before")) {
+          root.classList.add("checking");
+        }
+      } catch {
+        root.dataset.theme =
+          window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
       }
     })();
   </script>
+
   <style>
     :root {
       color-scheme: light;
       --bg: #eef3f9;
-      --panel: #ffffff;
+      --panel: #fff;
       --ink: #132033;
       --muted: #5a6b82;
       --line: #d9e2ee;
       --field: #f5f8fc;
       --accent: #0e8f78;
       --accent-strong: #0a7562;
-      --accent-ink: #ffffff;
-      --accent-soft: rgba(14, 143, 120, .12);
+      --accent-ink: #fff;
+      --accent-soft: rgba(14,143,120,.12);
       --danger: #cf3b3b;
       --ok: #137a57;
       --warn: #b7791f;
-      --shadow: 0 24px 60px rgba(20, 40, 80, .12);
+      --shadow: 0 24px 60px rgba(20,40,80,.12);
       --hero-a: #e3f6f1;
       --hero-b: #dfeaff;
-      --robot-shadow: 0, 0, 0;
     }
+
     :root[data-theme="dark"] {
       color-scheme: dark;
       --bg: #0b0f14;
@@ -61,145 +67,514 @@
       --accent: #3ccaa8;
       --accent-strong: #5fe0c1;
       --accent-ink: #052019;
-      --accent-soft: rgba(60, 202, 168, .14);
+      --accent-soft: rgba(60,202,168,.14);
       --danger: #ff8585;
       --ok: #5fd7a4;
       --warn: #f0b95a;
-      --shadow: 0 24px 60px rgba(0, 0, 0, .45);
+      --shadow: 0 24px 60px rgba(0,0,0,.45);
       --hero-a: #10231f;
       --hero-b: #121d33;
     }
+
     * { box-sizing: border-box; }
-    html { height: 100%; }
+    html { min-height: 100%; }
     html.checking body { visibility: hidden; }
+
     body {
-      margin: 0; min-height: 100%; background: var(--bg); color: var(--ink);
-      font-family: "Noto Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif; line-height: 1.6;
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Noto Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
+      line-height: 1.6;
       -webkit-font-smoothing: antialiased;
     }
-    button, input, select, textarea { font: inherit; color: inherit; }
+
+    button, input, select, textarea {
+      font: inherit;
+      color: inherit;
+    }
+
     .hidden { display: none !important; }
 
-    .page { min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); }
+    .page {
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: grid;
+      grid-template-columns: minmax(0,1.05fr) minmax(0,1fr);
+    }
 
-    /* ---------- اللوحة الجانبية (الروبوت) ---------- */
     .hero {
-      position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 28px; padding: 48px 32px; overflow: hidden;
-      background: radial-gradient(circle at 30% 20%, var(--hero-a), transparent 60%), radial-gradient(circle at 80% 85%, var(--hero-b), transparent 60%), var(--bg);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      padding: 48px 32px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 30% 20%,var(--hero-a),transparent 60%),
+        radial-gradient(circle at 80% 85%,var(--hero-b),transparent 60%),
+        var(--bg);
       border-inline-end: 1px solid var(--line);
     }
-    .hero::before, .hero::after { content: ""; position: absolute; border-radius: 50%; pointer-events: none; }
-    .hero::before { width: 420px; height: 420px; inset-inline-start: -140px; top: -140px; background: var(--accent-soft); filter: blur(2px); }
-    .hero::after { width: 300px; height: 300px; inset-inline-end: -100px; bottom: -110px; background: var(--accent-soft); }
-    .stage { position: relative; width: min(46vw, 250px); padding: 40px 0 34px; z-index: 1; }
-    .glow {
-      position: absolute; left: 50%; top: 46%; width: 170%; aspect-ratio: 1; transform: translate(-50%, -50%); pointer-events: none;
-      background: radial-gradient(circle, rgba(60, 170, 230, .26), transparent 62%); animation: glow 2.6s cubic-bezier(.45, 0, .55, 1) infinite;
-    }
-    .robot {
-      position: relative; display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none;
-      filter: drop-shadow(0 14px 16px rgba(0, 0, 0, .22)); animation: float 2.6s cubic-bezier(.45, 0, .55, 1) infinite; will-change: transform;
-    }
-    .floor {
-      position: absolute; left: 50%; bottom: 4px; width: 72%; height: 22px; margin-left: -36%; border-radius: 50%; pointer-events: none; filter: blur(2px);
-      background: radial-gradient(ellipse at center, rgba(var(--robot-shadow), .5) 0%, rgba(var(--robot-shadow), 0) 72%);
-      animation: floor 2.6s cubic-bezier(.45, 0, .55, 1) infinite;
-    }
-    :root[data-theme="dark"] .floor { background: radial-gradient(ellipse at center, rgba(0, 0, 0, .85) 0%, rgba(0, 0, 0, 0) 72%); }
-    @keyframes float { 0%, 100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-28px) rotate(1deg); } }
-    @keyframes floor { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(.58); opacity: .42; } }
-    @keyframes glow { 0%, 100% { opacity: .65; transform: translate(-50%, -50%) scale(1); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); } }
-    .hero-copy { position: relative; z-index: 1; text-align: center; max-width: 380px; }
-    .hero-copy h2 { margin: 0 0 8px; font-size: 30px; line-height: 1.3; }
-    .hero-copy p { margin: 0; color: var(--muted); font-size: 15px; }
-    .points { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0; padding: 0; list-style: none; }
-    .points li { padding: 6px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 
-    /* ---------- لوحة النموذج ---------- */
-    .panel { display: flex; align-items: center; justify-content: center; padding: 32px 24px; }
-    .card { width: min(100%, 440px); }
-    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
-    .brand img { width: 52px; height: 52px; border-radius: 14px; object-fit: cover; background: #0a0f12; box-shadow: var(--shadow); }
-    .brand strong { display: block; font-size: 20px; line-height: 1.2; }
+    .hero::before, .hero::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .hero::before {
+      width: 420px;
+      height: 420px;
+      inset-inline-start: -140px;
+      top: -140px;
+      background: var(--accent-soft);
+    }
+
+    .hero::after {
+      width: 300px;
+      height: 300px;
+      inset-inline-end: -100px;
+      bottom: -110px;
+      background: var(--accent-soft);
+    }
+
+    .stage {
+      position: relative;
+      width: min(46vw,250px);
+      padding: 40px 0 34px;
+      z-index: 1;
+    }
+
+    .glow {
+      position: absolute;
+      left: 50%;
+      top: 46%;
+      width: 170%;
+      aspect-ratio: 1;
+      transform: translate(-50%,-50%);
+      pointer-events: none;
+      background: radial-gradient(circle,rgba(60,170,230,.26),transparent 62%);
+      animation: glow 2.6s ease-in-out infinite;
+    }
+
+    .robot {
+      position: relative;
+      display: block;
+      width: 100%;
+      height: auto;
+      user-select: none;
+      -webkit-user-drag: none;
+      filter: drop-shadow(0 14px 16px rgba(0,0,0,.22));
+      animation: float 2.6s ease-in-out infinite;
+    }
+
+    .floor {
+      position: absolute;
+      left: 50%;
+      bottom: 4px;
+      width: 72%;
+      height: 22px;
+      margin-left: -36%;
+      border-radius: 50%;
+      background: radial-gradient(ellipse,rgba(0,0,0,.4),transparent 72%);
+      filter: blur(2px);
+      animation: floor 2.6s ease-in-out infinite;
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      max-width: 380px;
+    }
+
+    .hero-copy h2 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.3;
+    }
+
+    .hero-copy p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .points {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .points li {
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @keyframes float {
+      0%,100% { transform: translateY(0) rotate(-1deg); }
+      50% { transform: translateY(-28px) rotate(1deg); }
+    }
+
+    @keyframes floor {
+      0%,100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(.58); opacity: .42; }
+    }
+
+    @keyframes glow {
+      0%,100% { opacity: .65; }
+      50% { opacity: 1; }
+    }
+
+    .panel {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 24px;
+    }
+
+    .card { width: min(100%,440px); }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+
+    .brand img {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      object-fit: cover;
+      background: #0a0f12;
+      box-shadow: var(--shadow);
+    }
+
+    .brand strong { display: block; font-size: 20px; }
     .brand span { display: block; color: var(--muted); font-size: 12px; }
-    h1 { margin: 0 0 6px; font-size: 28px; line-height: 1.3; }
-    .lead { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
-    .notice { margin: 0 0 16px; padding: 10px 14px; border-radius: 12px; font-size: 13px; background: var(--accent-soft); border: 1px solid var(--accent); }
-    .notice.warn { background: rgba(183, 121, 31, .12); border-color: var(--warn); }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      line-height: 1.3;
+    }
+
+    .lead {
+      margin: 0 0 20px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .notice {
+      margin: 0 0 16px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      background: var(--accent-soft);
+      border: 1px solid var(--accent);
+    }
+
+    .notice.warn {
+      background: rgba(183,121,31,.12);
+      border-color: var(--warn);
+    }
 
     form { display: grid; gap: 6px; }
-    label, legend { font-size: 13px; font-weight: 600; margin-top: 8px; padding: 0; }
-    input[type="text"], input[type="password"], input[type="email"], textarea, select {
-      width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--field); outline: none;
-      transition: border-color .15s ease, box-shadow .15s ease;
+
+    label, legend {
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 8px;
+      padding: 0;
     }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="email"],
+    textarea,
+    select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--field);
+      outline: none;
+      transition: border-color .15s,box-shadow .15s;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
     textarea { resize: vertical; min-height: 110px; }
-    input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
     .password-field { position: relative; display: flex; }
     .password-field input { padding-inline-end: 74px; }
+
     .toggle {
-      position: absolute; inset-block: 6px; inset-inline-end: 6px; padding: 0 12px; border: 0; border-radius: 8px; cursor: pointer;
-      background: transparent; color: var(--muted); font-size: 12px; font-weight: 600;
+      position: absolute;
+      inset-block: 6px;
+      inset-inline-end: 6px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 8px;
+      cursor: pointer;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
     }
-    .toggle:hover, .toggle:focus-visible { background: var(--accent-soft); color: var(--ink); }
+
+    .toggle:hover, .toggle:focus-visible {
+      background: var(--accent-soft);
+      color: var(--ink);
+    }
+
     .hint { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
     .hint.ok { color: var(--ok); }
     .hint.warn { color: var(--warn); }
 
     fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-    .chip { position: relative; flex: 1 1 auto; margin: 0; cursor: pointer; }
-    .chip input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
-    .chip span {
-      display: block; padding: 9px 14px; border-radius: 999px; text-align: center; font-size: 13px; font-weight: 500; white-space: nowrap;
-      border: 1px solid var(--line); background: var(--field); user-select: none; transition: background .15s ease, border-color .15s ease, color .15s ease;
-    }
-    .chip:hover span { border-color: var(--accent); }
-    .chip input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
-    .chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-    .remember { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-weight: 500; cursor: pointer; }
-    .remember input { width: 17px; height: 17px; accent-color: var(--accent); }
-    .submit {
-      margin-top: 14px; padding: 13px 18px; border: 0; border-radius: 12px; cursor: pointer; font-size: 15px; font-weight: 700;
-      background: var(--accent); color: var(--accent-ink); box-shadow: 0 10px 24px var(--accent-soft); transition: transform .12s ease, background .15s ease, opacity .15s ease;
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
     }
+
+    .chip { position: relative; flex: 1 1 auto; margin: 0; cursor: pointer; }
+
+    .chip input {
+      position: absolute;
+      opacity: 0;
+      width: 1px;
+      height: 1px;
+      pointer-events: none;
+    }
+
+    .chip span {
+      display: block;
+      padding: 9px 14px;
+      border-radius: 999px;
+      text-align: center;
+      font-size: 13px;
+      white-space: nowrap;
+      border: 1px solid var(--line);
+      background: var(--field);
+      transition: background .15s,border-color .15s;
+    }
+
+    .chip:hover span { border-color: var(--accent); }
+
+    .chip input:checked + span {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 700;
+    }
+
+    .chip input:focus-visible + span {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .phone-group { width: 100%; margin: 8px 0 16px; }
+    .phone-group label { display: block; margin-bottom: 8px; }
+
+    .phone-input-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0 12px;
+      background: var(--field);
+    }
+
+    .phone-country-code { white-space: nowrap; font-weight: 600; }
+
+    .phone-input-wrapper input {
+      flex: 1;
+      min-width: 0;
+      width: 100%;
+      padding: 13px 0;
+      border: 0;
+      outline: none;
+      box-shadow: none;
+      background: transparent;
+      color: var(--ink);
+      direction: ltr;
+      text-align: left;
+      font: inherit;
+    }
+
+    .phone-input-wrapper input:focus { box-shadow: none; }
+
+    .phone-input-wrapper:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    #phone-hint {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .remember {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .remember input {
+      width: 17px;
+      height: 17px;
+      accent-color: var(--accent);
+    }
+
+    .submit {
+      margin-top: 14px;
+      padding: 13px 18px;
+      border: 0;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 700;
+      background: var(--accent);
+      color: var(--accent-ink);
+      box-shadow: 0 10px 24px var(--accent-soft);
+      transition: transform .12s,background .15s,opacity .15s;
+    }
+
     .submit:hover:not(:disabled) { background: var(--accent-strong); }
     .submit:active:not(:disabled) { transform: translateY(1px); }
     .submit:disabled { opacity: .6; cursor: progress; }
-    .error { min-height: 22px; margin: 8px 0 0; color: var(--danger); font-size: 13px; font-weight: 500; }
-    .links { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }
-    .link {
-      padding: 6px 0; border: 0; background: none; cursor: pointer; font-size: 14px; color: var(--accent); font-weight: 600;
+
+    .error {
+      min-height: 22px;
+      margin: 8px 0 0;
+      color: var(--danger);
+      font-size: 13px;
+      font-weight: 500;
     }
+
+    .links {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .link {
+      padding: 6px 0;
+      border: 0;
+      background: none;
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+
     .link:hover, .link:focus-visible { text-decoration: underline; }
     .link.muted { color: var(--muted); font-weight: 500; }
 
-    /* ---------- نافذة المساعدة ---------- */
-    dialog { width: min(92vw, 460px); padding: 0; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
-    dialog::backdrop { background: rgba(8, 14, 22, .55); backdrop-filter: blur(2px); }
+    dialog {
+      width: min(92vw,460px);
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      color: var(--ink);
+      box-shadow: var(--shadow);
+    }
+
+    dialog::backdrop {
+      background: rgba(8,14,22,.55);
+      backdrop-filter: blur(2px);
+    }
+
     .dialog-body { padding: 22px 22px 20px; }
-    .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+
+    .dialog-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
     .dialog-head h3 { margin: 0; font-size: 18px; }
-    .close { border: 0; background: var(--field); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 18px; line-height: 1; color: var(--muted); }
-    .close:hover { color: var(--ink); }
+
+    .close {
+      border: 0;
+      background: var(--field);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 18px;
+      color: var(--muted);
+    }
+
     .dialog-actions { display: flex; gap: 10px; margin-top: 10px; }
     .dialog-actions .submit { flex: 1; }
 
-    @media (min-width: 901px) { .panel { order: -1; } }
-    @media (max-width: 900px) {
+    @media (min-width:901px) {
+      .panel { order: -1; }
+    }
+
+    @media (max-width:900px) {
       .page { grid-template-columns: 1fr; }
-      .hero { padding: 26px 16px 8px; gap: 10px; border-inline-end: 0; background: radial-gradient(circle at 50% 0%, var(--hero-a), transparent 70%), var(--bg); }
+      .hero {
+        padding: 26px 16px 8px;
+        gap: 10px;
+        border-inline-end: 0;
+        background: radial-gradient(circle at 50% 0%,var(--hero-a),transparent 70%),var(--bg);
+      }
       .hero::before, .hero::after, .hero-copy, .points { display: none; }
       .stage { width: 118px; padding: 22px 0 20px; }
-      @keyframes float { 0%, 100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-14px) rotate(1deg); } }
       .panel { align-items: flex-start; padding: 8px 18px 40px; }
       h1 { font-size: 24px; }
+      @keyframes float {
+        0%,100% { transform: translateY(0) rotate(-1deg); }
+        50% { transform: translateY(-14px) rotate(1deg); }
+      }
     }
-    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition-duration: .01ms !important; } }
+
+    @media (prefers-reduced-motion:reduce) {
+      *,*::before,*::after {
+        animation: none !important;
+        transition-duration: .01ms !important;
+      }
+    }
   </style>
 </head>
+
 <body>
   <main class="page">
     <section class="hero" aria-hidden="true">
@@ -207,14 +582,17 @@
         <div class="glow"></div>
         <picture>
           <source srcset="/loader-robot.webp" type="image/webp">
-          <img class="robot" src="/loader-robot.png" alt="" width="420" height="510" decoding="async" draggable="false">
+          <img class="robot" src="/loader-robot.png" alt=""
+               width="420" height="510" decoding="async" draggable="false">
         </picture>
         <div class="floor"></div>
       </div>
+
       <div class="hero-copy">
         <h2>مساعدك الدراسي الذكي</h2>
         <p>اسأل فهيم عن دروسك، وسيشرحها لك خطوة بخطوة بأسلوب يناسب صفك.</p>
       </div>
+
       <ul class="points">
         <li>شرح الدروس</li>
         <li>حل المسائل</li>
@@ -226,7 +604,10 @@
       <div class="card">
         <div class="brand">
           <img src="/school-logo.png" alt="" width="52" height="52">
-          <div><strong>فهيم</strong><span>مدرسة خريبة السوق الثانوية الثانية للبنين</span></div>
+          <div>
+            <strong>فهيم</strong>
+            <span>مدرسة خريبة السوق الثانوية الثانية للبنين</span>
+          </div>
         </div>
 
         <h1 id="title">أنشئ حسابك في فهيم</h1>
@@ -235,8 +616,28 @@
 
         <form id="auth-form" novalidate>
           <label for="name" id="name-label">الاسم الرباعي</label>
-          <input id="name" type="text" autocomplete="name" maxlength="80" required placeholder="مثال: محمد أحمد علي الحسن">
-          <p class="hint register-only" id="name-hint" aria-live="polite">اكتب اسمك، واسم أبيك، واسم جدك، واسم العائلة.</p>
+          <input id="name" name="fullName" type="text"
+                 autocomplete="name" maxlength="80" required
+                 placeholder="مثال: محمد أحمد علي الحسن">
+
+          <p class="hint register-only" id="name-hint" aria-live="polite">
+            اكتب اسمك، واسم أبيك، واسم جدك، واسم العائلة.
+          </p>
+
+          <div class="form-group phone-group register-only" id="phone-group">
+            <label for="phone">رقم الهاتف الأردني</label>
+            <div class="phone-input-wrapper" dir="ltr">
+              <span class="phone-country-code">🇯🇴 +962</span>
+              <input id="phone" name="phone" type="tel"
+                     inputmode="numeric" autocomplete="tel-national"
+                     placeholder="7XXXXXXXX"
+                     pattern="7[0-9]{8}" minlength="9" maxlength="9"
+                     aria-describedby="phone-hint" required>
+            </div>
+            <small id="phone-hint">
+              أدخل رقمك دون الصفر الأول، مثال: 791234567
+            </small>
+          </div>
 
           <fieldset class="register-only" id="grade-field">
             <legend>الصف الدراسي</legend>
@@ -251,48 +652,80 @@
 
           <label for="password">كلمة المرور</label>
           <div class="password-field">
-            <input id="password" type="password" autocomplete="new-password" maxlength="128" required placeholder="أنشئ كلمة مرور">
-            <button class="toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+            <input id="password" name="password" type="password"
+                   autocomplete="new-password" maxlength="128"
+                   required placeholder="أنشئ كلمة مرور">
+            <button class="toggle" type="button"
+                    aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
           </div>
-          <p class="hint register-only" id="password-hint">10 أحرف على الأقل. احفظها جيدًا لأنك ستدخل بها في كل مرة.</p>
+
+          <p class="hint register-only" id="password-hint">
+            10 أحرف على الأقل. احفظها جيدًا لأنك ستدخل بها في كل مرة.
+          </p>
 
           <div class="register-only" id="confirm-group">
             <label for="password-confirm">تأكيد كلمة المرور</label>
             <div class="password-field">
-              <input id="password-confirm" type="password" autocomplete="new-password" maxlength="128" placeholder="أعد كتابة كلمة المرور">
-              <button class="toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
+              <input id="password-confirm" type="password"
+                     autocomplete="new-password" maxlength="128"
+                     placeholder="أعد كتابة كلمة المرور">
+              <button class="toggle" type="button"
+                      aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button>
             </div>
           </div>
 
-          <label class="remember"><input id="remember" type="checkbox" checked> تذكّرني على هذا الجهاز</label>
+          <label class="remember">
+            <input id="remember" type="checkbox" checked>
+            تذكّرني على هذا الجهاز
+          </label>
+
           <button class="submit" id="submit" type="submit">إنشاء حساب</button>
           <p class="error" id="error" role="alert" aria-live="assertive"></p>
         </form>
 
         <div class="links">
-          <button class="link" id="mode-toggle" type="button">لديك حساب؟ سجّل الدخول</button>
-          <button class="link muted" id="forgot" type="button">نسيت كلمة المرور؟ تواصل مع الإدارة</button>
+          <button class="link" id="mode-toggle" type="button">
+            لديك حساب؟ سجّل الدخول
+          </button>
+          <button class="link muted" id="forgot" type="button">
+            نسيت كلمة المرور؟ تواصل مع الإدارة
+          </button>
         </div>
       </div>
     </section>
   </main>
 
   <dialog id="help-dialog" aria-labelledby="help-title">
-    <form class="dialog-body" id="help-form" method="dialog" novalidate>
+    <form class="dialog-body" id="help-form" novalidate>
       <div class="dialog-head">
         <h3 id="help-title">استعادة الوصول إلى الحساب</h3>
-        <button class="close" id="help-close" type="button" aria-label="إغلاق">×</button>
+        <button class="close" id="help-close" type="button"
+                aria-label="إغلاق">×</button>
       </div>
-      <p class="lead" style="margin-bottom:6px">أرسل تفاصيل المشكلة وسيتواصل معك فريق المساعدة.</p>
+
+      <p class="lead" style="margin-bottom:6px">
+        أرسل تفاصيل المشكلة وسيتواصل معك فريق المساعدة.
+      </p>
+
       <label for="help-name">الاسم</label>
-      <input id="help-name" type="text" maxlength="100" placeholder="اسمك الرباعي" required>
+      <input id="help-name" type="text" maxlength="100"
+             placeholder="اسمك الرباعي" required>
+
       <label for="help-email">بريد للتواصل</label>
-      <input id="help-email" type="email" maxlength="254" placeholder="name@example.com" dir="ltr" required>
+      <input id="help-email" type="email" maxlength="254"
+             placeholder="name@example.com" dir="ltr" required>
+
       <label for="help-content">تفاصيل المشكلة</label>
-      <textarea id="help-content" maxlength="3000" placeholder="اذكر ما يحدث عند محاولة الدخول إلى حسابك..." required></textarea>
+      <textarea id="help-content" maxlength="3000"
+                placeholder="اذكر ما يحدث عند محاولة الدخول إلى حسابك..."
+                required></textarea>
+
       <p class="error" id="help-error" role="alert"></p>
+
       <div class="dialog-actions">
-        <button class="submit" id="help-submit" type="submit">إرسال طلب المساعدة</button>
+        <button class="submit" id="help-submit" type="submit">
+          إرسال طلب المساعدة
+        </button>
       </div>
     </form>
   </dialog>
@@ -300,200 +733,368 @@
   <script>
     (() => {
       "use strict";
+
       const $ = (id) => document.getElementById(id);
       const FLAG = "faheem_logged_in_before";
       const BOUNCE = "faheem_bounce";
       const PASSWORD_MIN = 10;
-      const NAME_PREFIXES = new Set(["عبد", "ابو", "ابن", "بن", "ام", "ال", "بنت"]);
-      const NAME_HINT = "اكتب اسمك، واسم أبيك، واسم جدك، واسم العائلة.";
-      const OLD_SERVER_MESSAGE = "أدخل البريد الإلكتروني وكلمة المرور.";
+      const NAME_PREFIXES = new Set([
+        "عبد", "ابو", "ابن", "بن", "ام", "ال", "بنت"
+      ]);
+      const NAME_HINT =
+        "اكتب اسمك، واسم أبيك، واسم جدك، واسم العائلة.";
+      const OLD_SERVER_MESSAGE =
+        "أدخل البريد الإلكتروني وكلمة المرور.";
+
       const params = new URLSearchParams(window.location.search);
       const root = document.documentElement;
-
       const form = $("auth-form");
       const nameInput = $("name");
+      const phoneInput = $("phone");
       const passwordInput = $("password");
       const confirmInput = $("password-confirm");
       const errorBox = $("error");
       const submitButton = $("submit");
 
-      const writeFlag = () => { try { localStorage.setItem(FLAG, "1"); sessionStorage.removeItem(BOUNCE); } catch { /* التخزين غير متاح */ } };
-      const nextUrl = () => {
-        const next = params.get("next") || "/";
-        return next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : "/";
+      const writeFlag = () => {
+        try {
+          localStorage.setItem(FLAG, "1");
+          sessionStorage.removeItem(BOUNCE);
+        } catch {}
       };
 
-      /* ===== الاسم الرباعي: نفس قواعد الخادم (عبد الله / أبو حماد / بن علي تُحسب اسمًا واحدًا) ===== */
-      const normalizeArabic = (text) => text
-        .replace(/[\u064b-\u065f\u0670\u0640]/g, "")
-        .replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه")
-        .replace(/\s+/g, " ").trim();
+      const nextUrl = () => {
+        const next = params.get("next") || "/";
+        return next.startsWith("/") &&
+          !next.startsWith("//") &&
+          !next.includes("\\")
+          ? next : "/";
+      };
+
+      function normalizeArabic(text) {
+        return text
+          .replace(/[\u064b-\u065f\u0670\u0640]/g, "")
+          .replace(/[أإآٱ]/g, "ا")
+          .replace(/ى/g, "ي")
+          .replace(/ة/g, "ه")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
       const ARABIC_ONLY = /^[\u0621-\u064a ]+$/;
 
       function countNameTokens(text) {
         const words = normalizeArabic(text).split(" ").filter(Boolean);
         let count = 0;
-        for (let i = 0; i < words.length; i += 1) {
-          if (NAME_PREFIXES.has(words[i]) && i + 1 < words.length) i += 1;
-          count += 1;
+
+        for (let i = 0; i < words.length; i++) {
+          if (NAME_PREFIXES.has(words[i]) && i + 1 < words.length) {
+            i++;
+          }
+          count++;
         }
+
         return count;
       }
 
       function validateFullName(text) {
         const normalized = normalizeArabic(text);
+
         if (!normalized) return "اكتب اسمك الرباعي.";
-        if (!ARABIC_ONLY.test(normalized)) return "اكتب الاسم بالأحرف العربية فقط، دون أرقام أو رموز.";
+
+        if (!ARABIC_ONLY.test(normalized)) {
+          return "اكتب الاسم بالأحرف العربية فقط، دون أرقام أو رموز.";
+        }
+
         const count = countNameTokens(text);
+
         if (count !== 4) {
           return `اكتب اسمك الرباعي كاملًا: اسمك، اسم أبيك، اسم جدك، اسم العائلة. عدد الأسماء التي كتبتها: ${count.toLocaleString("ar")}.`;
         }
+
         return "";
       }
 
       function updateNameHint() {
         const hint = $("name-hint");
         if (mode !== "register") return;
+
         const text = nameInput.value;
         let message = NAME_HINT;
         let state = "";
+
         if (normalizeArabic(text)) {
           const count = countNameTokens(text);
-          if (!validateFullName(text)) { message = "✓ اسم رباعي صحيح"; state = "ok"; }
-          else if (!ARABIC_ONLY.test(normalizeArabic(text))) { message = "اكتب الاسم بالأحرف العربية فقط."; state = "warn"; }
-          else if (count > 4) { message = "الاسم أكثر من أربعة أسماء. اكتب الأسماء الأربعة فقط."; state = "warn"; }
-          else message = `الأسماء المكتوبة: ${count.toLocaleString("ar")} من ٤`;
+
+          if (!validateFullName(text)) {
+            message = "✓ اسم رباعي صحيح";
+            state = "ok";
+          } else if (!ARABIC_ONLY.test(normalizeArabic(text))) {
+            message = "اكتب الاسم بالأحرف العربية فقط.";
+            state = "warn";
+          } else if (count > 4) {
+            message = "الاسم أكثر من أربعة أسماء. اكتب الأسماء الأربعة فقط.";
+            state = "warn";
+          } else {
+            message = `الأسماء المكتوبة: ${count.toLocaleString("ar")} من ٤`;
+          }
         }
+
         hint.textContent = message;
         hint.classList.toggle("ok", state === "ok");
         hint.classList.toggle("warn", state === "warn");
       }
 
-      /* ===== وضع الصفحة: إنشاء حساب / تسجيل دخول ===== */
       const requestedMode = params.get("mode");
       let mode = requestedMode === "login" ? "login" : "register";
 
       function setMode(next) {
         mode = next;
         const registering = mode === "register";
-        $("title").textContent = registering ? "أنشئ حسابك في فهيم" : "أهلًا بعودتك إلى فهيم";
+
+        $("title").textContent = registering
+          ? "أنشئ حسابك في فهيم"
+          : "أهلًا بعودتك إلى فهيم";
+
         $("lead").textContent = registering
-          ? "اكتب اسمك الرباعي، واختر صفك، وأنشئ كلمة مرور لتبدأ."
+          ? "اكتب اسمك الرباعي، واختر صفك، وأدخل رقم هاتفك وأنشئ كلمة مرور لتبدأ."
           : "سجّل الدخول باسمك الرباعي وكلمة المرور للوصول إلى محادثاتك.";
-        submitButton.textContent = registering ? "إنشاء حساب" : "تسجيل الدخول";
-        $("mode-toggle").textContent = registering ? "لديك حساب؟ سجّل الدخول" : "ليس لديك حساب؟ أنشئ حسابًا";
+
+        submitButton.textContent = registering
+          ? "إنشاء حساب" : "تسجيل الدخول";
+
+        $("mode-toggle").textContent = registering
+          ? "لديك حساب؟ سجّل الدخول"
+          : "ليس لديك حساب؟ أنشئ حسابًا";
+
         $("forgot").classList.toggle("hidden", registering);
-        document.querySelectorAll(".register-only").forEach((node) => node.classList.toggle("hidden", !registering));
-        $("name-label").textContent = registering ? "الاسم الرباعي" : "الاسم الرباعي (أو البريد الإلكتروني للأدمن)";
+
+        document.querySelectorAll(".register-only").forEach((node) => {
+          node.classList.toggle("hidden", !registering);
+        });
+
+        $("name-label").textContent = registering
+          ? "الاسم الرباعي"
+          : "الاسم الرباعي (أو البريد الإلكتروني للأدمن)";
+
         nameInput.autocomplete = registering ? "name" : "username";
-        nameInput.placeholder = registering ? "مثال: محمد أحمد علي الحسن" : "اسمك الرباعي";
-        passwordInput.autocomplete = registering ? "new-password" : "current-password";
-        passwordInput.placeholder = registering ? "أنشئ كلمة مرور" : "أدخل كلمة المرور";
+        nameInput.placeholder = registering
+          ? "مثال: محمد أحمد علي الحسن"
+          : "اسمك الرباعي";
+
+        passwordInput.autocomplete = registering
+          ? "new-password" : "current-password";
+
+        passwordInput.placeholder = registering
+          ? "أنشئ كلمة مرور" : "أدخل كلمة المرور";
+
+        phoneInput.required = registering;
         confirmInput.required = registering;
-        form.querySelectorAll('input[name="grade"]').forEach((radio) => { radio.required = registering; });
+
+        form.querySelectorAll('input[name="grade"]').forEach((radio) => {
+          radio.required = registering;
+        });
+
         errorBox.textContent = "";
-        document.title = registering ? "فهيم — إنشاء حساب" : "فهيم — تسجيل الدخول";
+        document.title = registering
+          ? "فهيم — إنشاء حساب" : "فهيم — تسجيل الدخول";
+
         updateNameHint();
       }
 
-      /* ===== الطلبات ===== */
       async function post(path, body) {
         const response = await fetch(path, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           cache: "no-store",
-          body: JSON.stringify(body),
+          body: JSON.stringify(body)
         });
+
         let data = {};
-        try { data = await response.json(); } catch { /* رد غير JSON */ }
-        if (!response.ok) throw new Error(data.error || `تعذّر إكمال الطلب (HTTP ${response.status}).`);
+        try {
+          data = await response.json();
+        } catch {}
+
+        if (!response.ok) {
+          throw new Error(
+            data.error || `تعذّر إكمال الطلب (HTTP ${response.status}).`
+          );
+        }
+
         return data;
       }
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         errorBox.textContent = "";
+
         const registering = mode === "register";
         let body;
+
         if (registering) {
           const nameError = validateFullName(nameInput.value);
-          if (nameError) { errorBox.textContent = nameError; nameInput.focus(); return; }
-          const grade = form.querySelector('input[name="grade"]:checked')?.value;
-          if (!grade) { errorBox.textContent = "اختر صفك الدراسي."; return; }
+
+          if (nameError) {
+            errorBox.textContent = nameError;
+            nameInput.focus();
+            return;
+          }
+
+          // التحقق من الهاتف عند التسجيل فقط
+          const phone = phoneInput.value.trim();
+
+          if (!/^7\d{8}$/.test(phone)) {
+            errorBox.textContent =
+              "أدخل رقمًا أردنيًا صحيحًا يبدأ بالرقم 7 ويتكون من 9 أرقام.";
+            phoneInput.focus();
+            return;
+          }
+
+          const grade =
+            form.querySelector('input[name="grade"]:checked')?.value;
+
+          if (!grade) {
+            errorBox.textContent = "اختر صفك الدراسي.";
+            return;
+          }
+
           if (passwordInput.value.length < PASSWORD_MIN) {
-            errorBox.textContent = `أنشئ كلمة مرور من ${PASSWORD_MIN.toLocaleString("ar")} أحرف على الأقل.`;
-            passwordInput.focus(); return;
+            errorBox.textContent =
+              `أنشئ كلمة مرور من ${PASSWORD_MIN.toLocaleString("ar")} أحرف على الأقل.`;
+            passwordInput.focus();
+            return;
           }
+
           if (passwordInput.value !== confirmInput.value) {
-            errorBox.textContent = "كلمتا المرور غير متطابقتين."; confirmInput.focus(); return;
+            errorBox.textContent = "كلمتا المرور غير متطابقتين.";
+            confirmInput.focus();
+            return;
           }
-          body = { fullName: nameInput.value.trim(), grade, password: passwordInput.value, remember: $("remember").checked };
+
+          // الهاتف يُرسل إلى الخادم مع بيانات إنشاء الحساب
+          body = {
+            fullName: nameInput.value.trim(),
+            phone: `+962${phone}`,
+            grade,
+            password: passwordInput.value,
+            remember: $("remember").checked
+          };
         } else {
-          if (!nameInput.value.trim()) { errorBox.textContent = "اكتب اسمك الرباعي."; nameInput.focus(); return; }
-          if (!passwordInput.value) { errorBox.textContent = "أدخل كلمة المرور."; passwordInput.focus(); return; }
-          body = { identifier: nameInput.value.trim(), password: passwordInput.value, remember: $("remember").checked };
+          if (!nameInput.value.trim()) {
+            errorBox.textContent = "اكتب اسمك الرباعي.";
+            nameInput.focus();
+            return;
+          }
+
+          if (!passwordInput.value) {
+            errorBox.textContent = "أدخل كلمة المرور.";
+            passwordInput.focus();
+            return;
+          }
+
+          body = {
+            identifier: nameInput.value.trim(),
+            password: passwordInput.value,
+            remember: $("remember").checked
+          };
         }
 
         submitButton.disabled = true;
-        const label = submitButton.textContent;
-        submitButton.textContent = registering ? "جارٍ إنشاء الحساب..." : "جارٍ تسجيل الدخول...";
+        const originalLabel = registering ? "إنشاء حساب" : "تسجيل الدخول";
+        submitButton.textContent = registering
+          ? "جارٍ إنشاء الحساب..." : "جارٍ تسجيل الدخول...";
+
         try {
-          await post(registering ? "/api/auth/register" : "/api/auth/login", body);
+          await post(
+            registering ? "/api/auth/register" : "/api/auth/login",
+            body
+          );
+
           writeFlag();
           window.location.replace(nextUrl());
         } catch (error) {
-          // هذه الرسالة لا يرسلها إلا server.py القديم (يطلب البريد بدل الاسم الرباعي)
-          errorBox.textContent = error.message === OLD_SERVER_MESSAGE
-            ? "الخادم يعمل بنسخة قديمة من server.py. استبدله بالنسخة الجديدة ثم أعد تشغيل الخادم."
-            : error.message;
+          errorBox.textContent =
+            error.message === OLD_SERVER_MESSAGE
+              ? "الخادم يعمل بنسخة قديمة من server.py. حدّث الخادم ثم أعد المحاولة."
+              : error.message;
+
           submitButton.disabled = false;
-          submitButton.textContent = label;
+          submitButton.textContent = originalLabel;
         }
       });
 
       nameInput.addEventListener("input", updateNameHint);
-      $("mode-toggle").addEventListener("click", () => setMode(mode === "login" ? "register" : "login"));
+
+      $("mode-toggle").addEventListener("click", () => {
+        setMode(mode === "login" ? "register" : "login");
+      });
+
       document.querySelectorAll(".toggle").forEach((button) => {
         button.addEventListener("click", () => {
           const field = button.closest(".password-field").querySelector("input");
           const show = field.type === "password";
+
           field.type = show ? "text" : "password";
           button.textContent = show ? "إخفاء" : "إظهار";
           button.setAttribute("aria-pressed", String(show));
-          button.setAttribute("aria-label", show ? "إخفاء كلمة المرور" : "إظهار كلمة المرور");
+          button.setAttribute(
+            "aria-label",
+            show ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"
+          );
         });
       });
 
-      /* ===== نافذة المساعدة (نسيت كلمة المرور) ===== */
+      // نافذة المساعدة
       const dialog = $("help-dialog");
       const helpForm = $("help-form");
+
       $("forgot").addEventListener("click", () => {
         const typed = nameInput.value.trim();
-        if (typed.includes("@")) $("help-email").value = typed;
-        else if (typed) $("help-name").value = typed;
+
+        if (typed.includes("@")) {
+          $("help-email").value = typed;
+        } else if (typed) {
+          $("help-name").value = typed;
+        }
+
         $("help-error").textContent = "";
         dialog.showModal();
-        ($("help-name").value ? $("help-content") : $("help-name")).focus();
+
+        ($("help-name").value
+          ? $("help-content")
+          : $("help-name")).focus();
       });
+
       $("help-close").addEventListener("click", () => dialog.close());
-      dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+
       helpForm.addEventListener("submit", async (event) => {
         event.preventDefault();
+
         if (!helpForm.reportValidity()) return;
+
         const button = $("help-submit");
         $("help-error").textContent = "";
         button.disabled = true;
+
         try {
           await post("/api/support-messages", {
             category: "message",
             content: $("help-content").value,
             name: $("help-name").value,
-            email: $("help-email").value,
+            email: $("help-email").value
           });
+
           dialog.close();
           helpForm.reset();
-          showNotice("وصل طلبك لفريق المساعدة، وسنتواصل معك عبر البريد.", false);
+          showNotice(
+            "وصل طلبك لفريق المساعدة، وسنتواصل معك عبر البريد.",
+            false
+          );
         } catch (error) {
           $("help-error").textContent = error.message;
         } finally {
@@ -508,18 +1109,27 @@
         notice.classList.remove("hidden");
       }
 
-      /* ===== من لديه جلسة صالحة يُحوَّل مباشرة إلى الموقع ===== */
       async function redirectIfSignedIn() {
         try {
-          const response = await fetch("/api/me", { credentials: "same-origin", cache: "no-store" });
+          const response = await fetch("/api/me", {
+            credentials: "same-origin",
+            cache: "no-store"
+          });
+
           if (!response.ok) return false;
-          // حماية من الدوران بين الصفحتين إذا كان الموقع الرئيسي يرفض الجلسة لسبب آخر
+
           let bounce = 0;
-          try { bounce = Number(sessionStorage.getItem(BOUNCE) || 0); } catch { /* تجاهل */ }
+          try {
+            bounce = Number(sessionStorage.getItem(BOUNCE) || 0);
+          } catch {}
+
           if (Date.now() - bounce < 8000) {
-            showNotice("تعذّر فتح الموقع الآن. حدّث الصفحة أو حاول بعد قليل.");
+            showNotice(
+              "تعذّر فتح الموقع الآن. حدّث الصفحة أو حاول بعد قليل."
+            );
             return false;
           }
+
           writeFlag();
           window.location.replace(nextUrl());
           return true;
@@ -529,10 +1139,14 @@
       }
 
       setMode(mode);
-      if (params.get("reason") === "expired") showNotice("انتهت جلستك. سجّل الدخول من جديد للمتابعة.");
+
+      if (params.get("reason") === "expired") {
+        showNotice("انتهت جلستك. سجّل الدخول من جديد للمتابعة.");
+      }
 
       const reveal = () => root.classList.remove("checking");
       const safety = window.setTimeout(reveal, 2000);
+
       redirectIfSignedIn().then((redirected) => {
         window.clearTimeout(safety);
         if (!redirected) reveal();
