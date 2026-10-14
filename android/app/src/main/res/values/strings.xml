@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">فهيم</string>
+    <string name="loading_message">فهيم يجهّز مساحتك</string>
+    <string name="connection_error_title">تعذّر الاتصال بفهيم</string>
+    <string name="connection_error_message">تحقّق من اتصال الإنترنت، ثم حاول فتح التطبيق مرة أخرى.</string>
+    <string name="retry">إعادة المحاولة</string>
+    <string name="logo_description">شعار مدرسة خريبة السوق الثانوية الثانية للبنين</string>
+</resources>

@@ -1,0 +1,46 @@
+plugins {
+    id "com.android.application"
+}
+
+def configuredServerUrl = providers.gradleProperty("faheemServerUrl")
+        .getOrElse("https://chat-boot-d9hz.onrender.com")
+def serverUri
+try {
+    serverUri = new URI(configuredServerUrl)
+} catch (Exception error) {
+    throw new GradleException("faheemServerUrl must be a valid HTTPS origin.", error)
+}
+if (serverUri.scheme != "https" || serverUri.host == null ||
+        serverUri.userInfo != null || serverUri.query != null ||
+        serverUri.fragment != null || !(serverUri.path in ["", "/"])) {
+    throw new GradleException("faheemServerUrl must be an HTTPS origin without credentials, path, query, or fragment.")
+}
+def serverOrigin = configuredServerUrl.replaceAll('/+$', '')
+
+android {
+    namespace "com.faheem.education"
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.faheem.education"
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName "1.0.0"
+        buildConfigField "String", "FAHEEM_SERVER_URL", "\"${serverOrigin}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation "androidx.activity:activity:1.10.1"
+    implementation "androidx.core:core:1.16.0"
+}

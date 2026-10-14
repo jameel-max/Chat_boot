@@ -1,0 +1,9 @@
+<resources>
+    <color name="faheem_teal">#0E8F78</color>
+    <color name="faheem_teal_dark">#0A7562</color>
+    <color name="faheem_background">#F4F8FA</color>
+    <color name="faheem_icon_background">#FFFFFF</color>
+    <color name="faheem_splash_background">#FFFFFF</color>
+    <color name="faheem_text">#132033</color>
+    <color name="faheem_muted">#5A6B82</color>
+</resources>

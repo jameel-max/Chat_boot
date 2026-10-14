@@ -37,6 +37,17 @@ class ChatApiTests(unittest.TestCase):
         self.env.start()
         self.api = patch("server.urlopen")
         self.mock_urlopen = self.api.start()
+        self.gemini_prewarm = patch.object(
+            server.ChatHandler, "start_gemini_prewarm"
+        )
+        self.gemini_prewarm.start()
+        self.gemini_stream = patch.object(
+            server.ChatHandler,
+            "open_gemini_stream",
+            autospec=True,
+            side_effect=self.open_gemini_stream,
+        )
+        self.gemini_stream.start()
         self.title_generation = patch(
             "server.generate_conversation_title",
             side_effect=lambda message, answer: (
@@ -48,6 +59,8 @@ class ChatApiTests(unittest.TestCase):
         self.title_generation.start()
 
     def tearDown(self):
+        self.gemini_stream.stop()
+        self.gemini_prewarm.stop()
         self.api.stop()
         self.title_generation.stop()
         self.env.stop()
@@ -56,6 +69,17 @@ class ChatApiTests(unittest.TestCase):
         self.httpd.shutdown()
         self.thread.join()
         self.httpd.server_close()
+
+    def open_gemini_stream(
+        self, handler, request_data, request_headers, request_payload=None
+    ):
+        request = Request(
+            server.API_URL,
+            data=request_data,
+            headers=request_headers,
+            method="POST",
+        )
+        return server.urlopen(request)
 
     def request(self, method, path, payload=None, authorized=True):
         headers = {}
@@ -133,12 +157,198 @@ class ChatApiTests(unittest.TestCase):
             all(instance is database_factory.return_value for instance in instances)
         )
 
+    def test_student_can_update_own_name_phone_and_grade(self):
+        old_name = "محمد أحمد علي الحسن"
+        new_name = "سعيد سالم ناصر العبد"
+        old_email = server.student_email(server.name_tokens(old_name))
+        new_email = server.student_email(server.name_tokens(new_name))
+        student = server.database.register_user(
+            old_email, "long-enough-password", phone="+962791234567"
+        )
+        server.database.update_student_grade(student["id"], "العاشر")
+        self.session_token = server.database.create_session(student["id"])
+
+        with patch.object(
+            server.USER_PROFILES,
+            "get",
+            return_value={"fullName": old_name, "grade": "10"},
+        ):
+            status, result, _ = self.request("GET", "/api/account/profile")
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            result["profile"],
+            {"fullName": old_name, "phone": "+962791234567", "grade": "10"},
+        )
+
+        with patch.object(server.USER_PROFILES, "set"), patch.object(
+            server.GRADE_DIRECTORY, "forget"
+        ):
+            status, result, _ = self.request(
+                "POST",
+                "/api/account/profile",
+                {
+                    "fullName": new_name,
+                    "phone": "078 123 4567",
+                    "grade": "9",
+                },
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["email"], new_email)
+        self.assertEqual(
+            result["profile"],
+            {"fullName": new_name, "phone": "+962781234567", "grade": "9"},
+        )
+        self.assertIsNone(server.database.login_user(old_email, "long-enough-password"))
+        self.assertEqual(
+            server.database.login_user(new_email, "long-enough-password")["id"],
+            student["id"],
+        )
+        self.assertEqual(server.database.get_session_user(self.session_token)["id"], student["id"])
+
+    def test_student_profile_update_rejects_duplicate_name(self):
+        own_name = "سعيد سالم ناصر العبد"
+        taken_name = "محمد أحمد علي الحسن"
+        own_email = server.student_email(server.name_tokens(own_name))
+        taken_email = server.student_email(server.name_tokens(taken_name))
+        own = server.database.register_user(own_email, "long-enough-password")
+        server.database.register_user(taken_email, "another-long-password")
+        self.session_token = server.database.create_session(own["id"])
+
+        status, result, _ = self.request(
+            "POST",
+            "/api/account/profile",
+            {
+                "fullName": taken_name,
+                "phone": "079 123 4567",
+                "grade": "10",
+            },
+        )
+
+        self.assertEqual(status, 409)
+        self.assertIn("اسم مستخدم", result["error"])
+        self.assertTrue(server.database.user_exists(own_email))
+
+    def test_non_student_cannot_read_or_update_student_profile(self):
+        status, result, _ = self.request("GET", "/api/account/profile")
+        self.assertEqual(status, 403)
+        self.assertIn("حسابات الطلاب فقط", result["error"])
+
+        status, result, _ = self.request(
+            "POST",
+            "/api/account/profile",
+            {
+                "fullName": "محمد أحمد علي الحسن",
+                "phone": "079 123 4567",
+                "grade": "10",
+            },
+        )
+        self.assertEqual(status, 403)
+
+    def test_student_profile_update_changes_login_and_preserves_session(self):
+        old_email = server.student_email(
+            server.name_tokens("محمد أحمد علي الحسن")
+        )
+        new_email = server.student_email(
+            server.name_tokens("سعيد سالم ناصر العبد")
+        )
+        user = server.database.register_user(
+            old_email, "long-enough-password", phone="+962791234567"
+        )
+        session = server.database.create_session(user["id"])
+
+        result = server.database.update_student_account_profile(
+            user["id"], new_email, "سعيد سالم ناصر العبد", "+962781234567", "التاسع"
+        )
+
+        self.assertEqual(result, "updated")
+        self.assertIsNone(server.database.login_user(old_email, "long-enough-password"))
+        self.assertEqual(
+            server.database.login_user(new_email, "long-enough-password")["id"],
+            user["id"],
+        )
+        self.assertEqual(server.database.get_session_user(session)["id"], user["id"])
+        self.assertEqual(
+            server.database.get_student_account_profile(user["id"]),
+            {"email": new_email, "phone": "+962781234567", "grade": "التاسع"},
+        )
+
+    def test_student_profile_update_rejects_duplicate_login_name(self):
+        target_email = server.student_email(
+            server.name_tokens("محمد أحمد علي الحسن")
+        )
+        original_email = server.student_email(
+            server.name_tokens("سعيد سالم ناصر العبد")
+        )
+        existing = server.database.register_user(
+            target_email, "long-enough-password"
+        )
+        changing = server.database.register_user(
+            original_email, "long-enough-password"
+        )
+
+        result = server.database.update_student_account_profile(
+            changing["id"], target_email, "محمد أحمد علي الحسن", "+962791234567", "العاشر"
+        )
+
+        self.assertEqual(result, "duplicate")
+        self.assertTrue(server.database.user_exists(original_email))
+        self.assertTrue(server.database.user_exists(target_email))
+        self.assertEqual(
+            server.database.get_student_account_profile(changing["id"])["email"],
+            original_email,
+        )
+
     def test_requires_gemini_api_key(self):
-        with patch.dict(server.os.environ, {"GEMINI_API_KEY": ""}):
+        with patch.dict(server.os.environ, {"GEMINI_API_KEY": ""}), patch(
+            "builtins.print"
+        ) as print_mock:
             status, result = self.post({"message": "مرحبا"})
         self.assertEqual(status, 503)
-        self.assertIn("GEMINI_API_KEY", result["error"])
+        self.assertIn("المساعد غير متاح الآن", result["error"])
+        self.assertNotIn("GEMINI_API_KEY", result["error"])
         self.mock_urlopen.assert_not_called()
+        diagnostic = next(
+            call.args[0]
+            for call in print_mock.call_args_list
+            if call.args[0].startswith("[CHAT_DIAG]")
+        )
+        self.assertIn('"phase":"gemini_configuration"', diagnostic)
+        self.assertIn('"error_type":"ConfigurationError"', diagnostic)
+        self.assertIn('"upstream_http_status":null', diagnostic)
+        self.assertIn('"message":"Gemini API key is not configured."', diagnostic)
+
+    def test_sanitizes_chat_diagnostic_secrets_and_personal_data(self):
+        secret = "AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6"
+        email = "student@example.com"
+        phone = "+962790000001"
+
+        diagnostic = server.safe_chat_diagnostic_message(
+            f"api_key={secret} {email} {phone}"
+        )
+
+        for sensitive_value in (secret, email, phone):
+            self.assertNotIn(sensitive_value, diagnostic)
+        self.assertIn("[REDACTED]", diagnostic)
+        self.assertIn("[REDACTED_EMAIL]", diagnostic)
+        self.assertIn("[REDACTED_PHONE]", diagnostic)
+
+    def test_rejects_invalid_gemini_model_with_diagnostic(self):
+        with patch.dict(server.os.environ, {"GEMINI_MODEL": "invalid model"}), patch(
+            "builtins.print"
+        ) as print_mock:
+            status, result = self.post({"message": "مرحبا"})
+
+        self.assertEqual(status, 500)
+        self.assertIn("المساعد غير جاهز الآن", result["error"])
+        self.mock_urlopen.assert_not_called()
+        diagnostic = next(
+            call.args[0]
+            for call in print_mock.call_args_list
+            if call.args[0].startswith("[CHAT_DIAG]")
+        )
+        self.assertIn('"phase":"model_validation"', diagnostic)
+        self.assertIn('"error_type":"ConfigurationError"', diagnostic)
 
     def test_protects_chat_api_without_a_session(self):
         status, result = self.post(
@@ -234,49 +444,6 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual(len(images), 1)
         self.assertEqual(images[0]["mime_type"], "image/png")
 
-    def test_curriculum_context_and_verified_source_flow_through_existing_chat(self):
-        curriculum_result = {
-            "searched": True,
-            "extra_parts": [
-                {"type": "text", "text": "[مقطع رسمي | صفحة 47]\nالقوة تساوي الكتلة مضروبة بالتسارع."}
-            ],
-            "system_note": "التزم بالمقطع الرسمي ولا تخترع صفحة.",
-            "answer_suffix": "\n\n**المصادر:**\n[1] كتاب الفيزياء — ص. 47",
-            "sources": [{"book": "كتاب الفيزياء", "page": 47}],
-            "official": True,
-        }
-        self.mock_urlopen.return_value = BytesIO(
-            (
-                'event: step.delta\n'
-                'data: {"event_type":"step.delta","delta":{"type":"text","text":"القوة تساوي الكتلة مضروبة بالتسارع."}}\n\n'
-                'event: interaction.completed\n'
-                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_curriculum"}}\n\n'
-            ).encode()
-        )
-
-        with patch("server.retrieve_curriculum", return_value=curriculum_result) as retrieve:
-            status, result = self.post({"message": "اشرح قانون نيوتن الثاني"})
-
-        self.assertEqual(status, 200)
-        retrieve.assert_called_once()
-        sent = json.loads(self.mock_urlopen.call_args.args[0].data)
-        self.assertIn("التزم بالمقطع الرسمي", sent["system_instruction"])
-        sent_text = "\n".join(
-            part.get("text", "") for part in sent["input"] if part["type"] == "text"
-        )
-        self.assertIn("القوة تساوي الكتلة مضروبة بالتسارع", sent_text)
-        self.assertIn("اشرح قانون نيوتن الثاني", sent_text)
-        self.assertEqual(result["answer"], "القوة تساوي الكتلة مضروبة بالتسارع.")
-        done = next(
-            event for name, event in result["events"] if name == "done"
-        )
-        self.assertNotIn("sources", done)
-
-        stored = server.database.get_conversation(
-            self.user["id"], result["conversationId"]
-        )
-        self.assertEqual(stored[1][-1]["content"], result["answer"])
-
     def test_table_formatting_followup_reuses_previous_schedule_context(self):
         previous = server.database.prepare_user_message(
             self.user["id"],
@@ -319,59 +486,6 @@ class ChatApiTests(unittest.TestCase):
         )
         self.assertIn("فهيم: " + schedule, transcript)
         self.assertIn("نظم المعلومات بشكل جدول", transcript)
-
-    def test_curriculum_embedding_failure_does_not_use_unverified_fallback(self):
-        with patch(
-            "server.retrieve_curriculum",
-            side_effect=server.CurriculumError("embedding unavailable"),
-        ):
-            status, result = self.post({"message": "اشرح قانون نيوتن الثاني"})
-        self.assertEqual(status, 503)
-        self.assertIn("تعذّر البحث في محتوى المنهج", result["error"])
-        self.mock_urlopen.assert_not_called()
-
-    def test_curriculum_filters_using_explicit_subject_in_postgres_chat_history(self):
-        previous = server.database.prepare_user_message(
-            self.user["id"],
-            None,
-            "سؤال في الفيزياء",
-            "أنا أدرس الفيزياء في الفصل الثاني",
-            None,
-            None,
-        )
-        server.database.complete_assistant_message(
-            previous["id"], "تمام، سأشرح على هذا الأساس.", "old-interaction"
-        )
-        self.mock_urlopen.return_value = BytesIO(
-            (
-                'event: step.delta\n'
-                'data: {"event_type":"step.delta","delta":{"type":"text","text":"الشرح."}}\n\n'
-                'event: interaction.completed\n'
-                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_followup"}}\n\n'
-            ).encode()
-        )
-        empty_retrieval = {
-            "searched": True,
-            "extra_parts": [],
-            "system_note": "",
-            "answer_suffix": "",
-            "sources": [],
-        }
-
-        with patch(
-            "server.retrieve_curriculum", return_value=empty_retrieval
-        ) as retrieve:
-            status, _ = self.post(
-                {"message": "اشرحها", "conversationId": previous["id"]}
-            )
-
-        self.assertEqual(status, 200)
-        self.assertIsNone(retrieve.call_args.args[2])
-        kwargs = retrieve.call_args.kwargs
-        self.assertEqual(
-            kwargs["conversation_history"][0]["content"],
-            "أنا أدرس الفيزياء في الفصل الثاني",
-        )
 
     def test_reloads_referenced_previous_image_but_skips_unrelated_images(self):
         previous_image = b"previous-png-image"
@@ -928,9 +1042,74 @@ class ChatApiTests(unittest.TestCase):
 
     def test_reports_gemini_connection_error(self):
         self.mock_urlopen.side_effect = URLError("offline")
-        status, result = self.post({"message": "مرحبا"})
+        with patch("builtins.print") as print_mock:
+            status, result = self.post({"message": "مرحبا"})
         self.assertEqual(status, 502)
-        self.assertIn("خدمة Gemini", result["error"])
+        self.assertEqual(
+            result["error"],
+            "تعذّر الاتصال بالمساعد. تحقق من اتصال الإنترنت ثم حاول مرة أخرى.",
+        )
+        self.assertNotIn("offline", result["error"])
+        diagnostic = next(
+            call.args[0]
+            for call in print_mock.call_args_list
+            if call.args[0].startswith("[CHAT_DIAG]")
+        )
+        self.assertIn('"phase":"gemini_connection"', diagnostic)
+        self.assertIn('"error_type":"URLError"', diagnostic)
+        self.assertIn('"message":"Could not connect to the Gemini service."', diagnostic)
+
+    def test_reports_gemini_http_503_without_logging_error_body(self):
+        secret = "AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6"
+        email = "student@example.com"
+        phone = "+962790000001"
+        sensitive_body = (
+            f'{{"error":"{secret} {email} {phone} طالب فهيم"}}'
+        ).encode()
+        upstream_error = HTTPError(
+            server.API_URL,
+            503,
+            "Service Unavailable",
+            {},
+            BytesIO(sensitive_body),
+        )
+        self.mock_urlopen.side_effect = upstream_error
+
+        with patch("builtins.print") as print_mock:
+            status, result = self.post({"message": "مرحبا"})
+        upstream_error.close()
+
+        self.assertEqual(status, 503)
+        self.assertIn("واجه المساعد مشكلة مؤقتة", result["error"])
+        self.assertNotIn(secret, result["error"])
+        diagnostic = next(
+            call.args[0]
+            for call in print_mock.call_args_list
+            if call.args[0].startswith("[CHAT_DIAG]")
+        )
+        self.assertIn('"phase":"gemini_upstream_response"', diagnostic)
+        self.assertIn('"error_type":"HTTPError"', diagnostic)
+        self.assertIn('"upstream_http_status":503', diagnostic)
+        self.assertIn('"message":"Service Unavailable"', diagnostic)
+        for sensitive_value in (secret, email, phone, "طالب فهيم"):
+            self.assertNotIn(sensitive_value, diagnostic)
+
+    def test_reports_gemini_request_timeout_with_diagnostic(self):
+        self.mock_urlopen.side_effect = TimeoutError("timed out")
+
+        with patch("builtins.print") as print_mock:
+            status, result = self.post({"message": "مرحبا"})
+
+        self.assertEqual(status, 504)
+        self.assertIn("تأخر رد المساعد", result["error"])
+        diagnostic = next(
+            call.args[0]
+            for call in print_mock.call_args_list
+            if call.args[0].startswith("[CHAT_DIAG]")
+        )
+        self.assertIn('"phase":"gemini_request"', diagnostic)
+        self.assertIn('"error_type":"TimeoutError"', diagnostic)
+        self.assertIn('"upstream_http_status":null', diagnostic)
 
     def test_reports_malformed_gemini_stream_event(self):
         self.mock_urlopen.return_value = BytesIO(
@@ -938,7 +1117,8 @@ class ChatApiTests(unittest.TestCase):
         )
         status, result = self.post({"message": "مرحبا"})
         self.assertEqual(status, 200)
-        self.assertIn("حدث بث غير مفهوم", result["error"])
+        self.assertIn("وصل رد غير واضح من المساعد", result["error"])
+        self.assertNotIn("not-json", result["error"])
 
     def test_reports_stream_ended_before_completion(self):
         self.mock_urlopen.return_value = BytesIO(
@@ -949,7 +1129,7 @@ class ChatApiTests(unittest.TestCase):
         )
         status, result = self.post({"message": "مرحبا"})
         self.assertEqual(status, 200)
-        self.assertIn("انقطع اتصال Gemini", result["error"])
+        self.assertIn("انقطع الرد قبل اكتماله", result["error"])
 
     def test_saves_streamed_messages_and_exposes_history(self):
         self.mock_urlopen.return_value = BytesIO(
@@ -1035,14 +1215,24 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual(server.database.list_conversations(self.user["id"]), [])
 
     def test_registers_and_logs_in_with_persistent_session(self):
-        status, result, headers = self.request(
-            "POST",
-            "/api/auth/register",
-            {"email": "new@example.com", "password": "long-enough-pass", "remember": True},
-            authorized=False,
-        )
+        full_name = "محمد أحمد علي الحسن"
+        email = server.student_email(server.name_tokens(full_name))
+        registration = {
+            "fullName": full_name,
+            "phone": "0791234567",
+            "grade": "10",
+            "password": "long-enough-pass",
+            "remember": True,
+        }
+        with patch.object(server.USER_PROFILES, "set"):
+            status, result, headers = self.request(
+                "POST",
+                "/api/auth/register",
+                registration,
+                authorized=False,
+            )
         self.assertEqual(status, 200)
-        self.assertEqual(result["user"]["email"], "new@example.com")
+        self.assertEqual(result["user"]["email"], email)
         logged_in_user_id = result["user"]["id"]
         cookie = headers["Set-Cookie"]
         self.assertIn("HttpOnly", cookie)
@@ -1063,19 +1253,20 @@ class ChatApiTests(unittest.TestCase):
             logged_in_user_id,
         )
 
-        status, duplicate, _ = self.request(
-            "POST",
-            "/api/auth/register",
-            {"email": "NEW@example.com", "password": "another-long-pass"},
-            authorized=False,
-        )
+        with patch.object(server.USER_PROFILES, "set"):
+            status, duplicate, _ = self.request(
+                "POST",
+                "/api/auth/register",
+                {**registration, "password": "another-long-pass"},
+                authorized=False,
+            )
         self.assertEqual(status, 409)
-        self.assertIn("مسجل", duplicate["error"])
+        self.assertIn("مسجّل مسبقًا", duplicate["error"])
 
         status, login, login_headers = self.request(
             "POST",
             "/api/auth/login",
-            {"email": "NEW@example.com", "password": "long-enough-pass"},
+            {"identifier": full_name, "password": "long-enough-pass"},
             authorized=False,
         )
         self.assertEqual(status, 200)
@@ -1089,7 +1280,9 @@ class ChatApiTests(unittest.TestCase):
     def test_rejects_short_password_and_invalid_credentials(self):
         status, result = self.post(
             {
-                "email": "new@example.com",
+                "fullName": "محمد أحمد علي الحسن",
+                "phone": "0791234567",
+                "grade": "10",
                 "password": "short",
             },
             path="/api/auth/register",
@@ -1109,11 +1302,14 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertIn("غير صحيحة", result["error"])
 
-    def test_login_requests_account_creation_when_email_is_not_registered(self):
+    def test_login_requests_account_creation_for_unregistered_student_name(self):
         status, result, _ = self.request(
             "POST",
             "/api/auth/login",
-            {"email": "missing@example.com", "password": "incorrect-password"},
+            {
+                "identifier": "محمد أحمد علي الحسن",
+                "password": "incorrect-password",
+            },
             authorized=False,
         )
 

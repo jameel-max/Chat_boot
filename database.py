@@ -1464,6 +1464,83 @@ class Database:
     # STUDENT
     # ============================================================
 
+    def get_student_account_profile(self, user_id):
+
+        with self.connect() as connection:
+
+            row = connection.execute(
+                """
+                SELECT email, phone, grade
+                FROM users
+                WHERE id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+
+        return dict(row) if row else None
+
+    def update_student_account_profile(
+        self,
+        user_id,
+        email,
+        full_name,
+        phone,
+        grade,
+    ):
+
+        email = email.strip().casefold()
+
+        with self.connect() as connection:
+
+            connection.execute("BEGIN IMMEDIATE")
+            user = connection.execute(
+                "SELECT id FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            if not user:
+                connection.rollback()
+                return "not_found"
+
+            duplicate = connection.execute(
+                """
+                SELECT 1
+                FROM users
+                WHERE lower(email) = lower(?)
+                  AND id != ?
+                """,
+                (email, user_id),
+            ).fetchone()
+            if duplicate:
+                connection.rollback()
+                return "duplicate"
+
+            connection.execute(
+                """
+                UPDATE users
+                SET email = ?,
+                    google_sub = ?,
+                    name = ?,
+                    phone = ?,
+                    grade = ?,
+                    grade_question_asked = 1
+                WHERE id = ?
+                """,
+                (
+                    email,
+                    f"password:{email}",
+                    full_name,
+                    phone,
+                    grade,
+                    user_id,
+                ),
+            )
+            connection.execute(
+                "DELETE FROM password_reset_codes WHERE user_id = ?",
+                (user_id,),
+            )
+
+        return "updated"
+
     def get_student_preferences(
         self,
         user_id,

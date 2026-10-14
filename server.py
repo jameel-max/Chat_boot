@@ -83,9 +83,17 @@ ALLOWED_DOCUMENT_EXTENSIONS = {
 database = None
 _database_lock = threading.Lock()
 
-SYSTEM_INSTRUCTION = (
-    "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين. "
-    "انشئ جدولا اذا كانت المعلومات غير واضحة كنص."
+SYSTEM_INSTRUCTION = " ".join(
+    (
+        "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين.",
+        "أجب باللهجة الأردنية الطبيعية وبأسلوب واضح ومناسب للطلاب.",
+        "اترك سطرًا فارغًا بين الفقرات، واكتب كل عنصر في سطر مستقل، ولا تجمع عنصرين في السطر نفسه.",
+        "استخدم عناوين Markdown قصيرة وواضحة، وضع الشيفرات متعددة الأسطر في كتلة Markdown.",
+        "استخدم عناصر HTML الهيكلية <table> للجداول عندما يكون الجدول مفيدًا فعلًا،",
+        "ولا تستخدم صيغة Markdown ذات | للجداول، ولا تكتب وسوم HTML في النص العادي.",
+        "ولا تضعهما في جدول إلا إذا كان الجدول مفيدًا فعلًا.",
+        "تجنب LaTeX المعقد، ولا تكتب وسوم HTML.",
+    )
 )
 
 GRADE_NAMES = {
@@ -181,7 +189,13 @@ def user_asks_assistant_identity(message):
 
 
 def conversation_system_instruction(
-    first_reply, grade, ask_grade, user_greeted=False, asks_identity=False
+    first_reply,
+    grade,
+    ask_grade,
+    user_greeted=False,
+    asks_identity=False,
+    user_message="",
+    has_previous_answer=False,
 ):
     instructions = [SYSTEM_INSTRUCTION]
     if user_greeted or asks_identity:
@@ -216,6 +230,13 @@ def conversation_system_instruction(
         instructions.append(
             "سبق أن سُئل الطالب عن صفه ولم يقدّم صفًا محفوظًا؛ لا تعاود السؤال عنه "
             "في هذه المحادثة أو في محادثة جديدة."
+        )
+    if (
+        has_previous_answer
+        and re.search(r"جدول|جداول|جدولي", user_message)
+    ):
+        instructions.append(
+            "أعد تنسيق المعلومات نفسها فقط في جدول مناسب، ولا تبدأ موضوعًا أو خطة جديدة."
         )
     return " ".join(instructions)
 
@@ -960,6 +981,45 @@ class GeminiStream:
         return False
 
 
+def safe_chat_diagnostic_message(message):
+    message = str(message)
+    message = re.sub(
+        r"(?i)\b(?:api[_ -]?key|authorization|password|secret|token)\b"
+        r"\s*[:=]\s*[^\s,;]+",
+        "[REDACTED]",
+        message,
+    )
+    message = re.sub(r"(?i)\bbearer\s+\S+", "Bearer [REDACTED]", message)
+    message = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", message)
+    message = re.sub(r"\bsk-[0-9A-Za-z_-]{16,}\b", "[REDACTED]", message)
+    message = re.sub(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+        "[REDACTED_EMAIL]",
+        message,
+    )
+    message = re.sub(
+        r"(?<!\w)\+?\d[\d\s().-]{7,}\d(?!\w)",
+        "[REDACTED_PHONE]",
+        message,
+    )
+    message = re.sub(r"[\r\n\t]+", " ", message)
+    return message[:240]
+
+
+def log_chat_diagnostic(phase, error_type, message, upstream_http_status=None):
+    diagnostic = {
+        "phase": phase,
+        "error_type": error_type,
+        "upstream_http_status": upstream_http_status,
+        "message": safe_chat_diagnostic_message(message),
+    }
+    print(
+        "[CHAT_DIAG] "
+        + json.dumps(diagnostic, ensure_ascii=True, separators=(",", ":")),
+        flush=True,
+    )
+
+
 class ChatHandler(SimpleHTTPRequestHandler):
     # تعطيل خوارزمية Nagle: كل جزء من البث يُرسل فورًا بدل أن ينتظر ACK (يزيل تقطّع الكتابة).
     disable_nagle_algorithm = True
@@ -1056,6 +1116,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
                         "isPrimaryAdmin": self.is_primary_admin(user),
                     }
                 )
+            return
+
+        if self.path == "/api/account/profile":
+            self.account_profile(user)
             return
 
         if self.path == "/api/preferences":
@@ -1272,6 +1336,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if self.path == "/api/auth/change-password":
             self.change_password()
             return
+        if self.path == "/api/account/profile":
+            self.account_profile()
+            return
         if self.path == "/api/support-messages":
             self.submit_support_message()
             return
@@ -1481,6 +1548,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
             for character in model
         ):
+            log_chat_diagnostic(
+                "model_validation",
+                "ConfigurationError",
+                "GEMINI_MODEL is invalid.",
+            )
             self.send_json(
                 {
                     "error": (
@@ -1554,6 +1626,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
 
         api_key = os.environ.get("GEMINI_API_KEY", "").strip()
         if not api_key:
+            log_chat_diagnostic(
+                "gemini_configuration",
+                "ConfigurationError",
+                "Gemini API key is not configured.",
+            )
             self.send_json(
                 {
                     "error": (
@@ -1588,6 +1665,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 ask_grade=ask_grade,
                 user_greeted=user_starts_with_greeting(message),
                 asks_identity=user_asks_assistant_identity(message),
+                user_message=message,
+                has_previous_answer=any(
+                    row["role"] == "assistant" for row in previous_messages
+                ),
             )
             images_started = time.perf_counter()
             relevant_images = select_prior_images(previous_messages, message)
@@ -1664,10 +1745,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
         gemini_started = time.perf_counter()
         stored["gemini_started_at"] = gemini_started
         stream_started = False
+        failure_phase = "gemini_request"
         try:
             with self.open_gemini_stream(
                 request_data, request_headers, request_payload
             ) as response:
+                failure_phase = "gemini_stream"
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache, no-transform")
@@ -1696,6 +1779,14 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     )
                 return
         except HTTPError as error:
+            log_chat_diagnostic(
+                "gemini_upstream_response",
+                type(error).__name__,
+                http.client.responses.get(
+                    error.code, "Gemini returned an HTTP error."
+                ),
+                upstream_http_status=error.code,
+            )
             if error.code == 429:
                 detail = (
                     "الخادم مشغول حاليًا بسبب كثرة الطلبات. "
@@ -1717,6 +1808,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             return
         except TimeoutError:
+            log_chat_diagnostic(
+                failure_phase,
+                "TimeoutError",
+                "Timed out while waiting for the Gemini response.",
+            )
             self.send_json(
                 {
                     "error": (
@@ -1728,6 +1824,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             return
         except URLError:
+            log_chat_diagnostic(
+                "gemini_connection",
+                "URLError",
+                "Could not connect to the Gemini service.",
+            )
             self.send_json(
                 {
                     "error": (
@@ -1740,7 +1841,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         except (BrokenPipeError, ConnectionResetError):
             return
-        except Exception:
+        except Exception as error:
+            log_chat_diagnostic(
+                failure_phase,
+                type(error).__name__,
+                "Unexpected error while starting the Gemini response.",
+            )
             if stream_started:
                 try:
                     self.send_sse(
@@ -2385,6 +2491,90 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "المظهر غير صالح."}, 400)
             return
         self.send_json({"preferences": USER_PREFERENCES.set_theme(user["id"], theme)})
+
+    def account_profile(self, user=None):
+        if user is None:
+            user = self.current_user()
+        if not user:
+            self.send_unauthorized()
+            return
+        if not student_name_from_email(user.get("email", "")):
+            self.send_json(
+                {"error": "إعدادات الاسم والصف والهاتف متاحة لحسابات الطلاب فقط."},
+                403,
+            )
+            return
+
+        if self.command == "GET":
+            profile = get_database().get_student_account_profile(user["id"])
+            if not profile:
+                self.send_json({"error": "الحساب غير موجود."}, 404)
+                return
+            saved_profile = USER_PROFILES.get(user["id"]) or {}
+            grade_key = saved_profile.get("grade")
+            if grade_key not in GRADE_CHOICES:
+                grade_key = STORED_TO_GRADE_KEY.get(profile["grade"])
+            self.send_json(
+                {
+                    "profile": {
+                        "fullName": saved_profile.get("fullName")
+                        or student_name_from_email(profile["email"]),
+                        "phone": profile["phone"] or "",
+                        "grade": grade_key or "",
+                    }
+                }
+            )
+            return
+
+        payload = self.read_json_body()
+        if payload is None:
+            return
+        full_name, error = validate_full_name(payload.get("fullName"))
+        if error:
+            self.send_json({"error": error}, 400)
+            return
+        grade_key = str(payload.get("grade", ""))
+        if grade_key not in GRADE_CHOICES:
+            self.send_json({"error": "اختر صفك الدراسي."}, 400)
+            return
+        phone, error = normalize_phone_number(payload.get("phone"))
+        if error:
+            self.send_json({"error": error}, 400)
+            return
+
+        email = student_email(name_tokens(full_name))
+        try:
+            result = get_database().update_student_account_profile(
+                user["id"],
+                email,
+                full_name,
+                phone,
+                GRADE_CHOICES[grade_key]["stored"],
+            )
+        except Database.integrity_error_types:
+            result = "duplicate"
+        except Database.error_types:
+            self.send_json({"error": "تعذّر حفظ بيانات الحساب."}, 500)
+            return
+
+        if result == "duplicate":
+            self.send_json(
+                {"error": "هذا الاسم مستخدم لحساب آخر. اختر اسمًا مختلفًا."}, 409
+            )
+            return
+        if result == "not_found":
+            self.send_json({"error": "الحساب غير موجود."}, 404)
+            return
+
+        USER_PROFILES.set(user["id"], full_name, grade_key)
+        GRADE_DIRECTORY.forget(user["id"])
+        self.send_json(
+            {
+                "ok": True,
+                "profile": {"fullName": full_name, "phone": phone, "grade": grade_key},
+                "email": email,
+            }
+        )
 
     def current_user(self):
         return get_database().get_session_user(self.session_token())
