@@ -87,9 +87,19 @@ _database_lock = threading.Lock()
 SYSTEM_INSTRUCTION = " ".join(
     (
         "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين.",
-        "اترك سطرًا فارغًا بين الفقرات، واستخدم عناوين Markdown قصيرة عند الحاجة.",
-        "استخدم الجداول فقط عندما تكون مفيدة فعلًا.",
-        "تجنب التكرار والمقدمات الطويلة، ونفّذ طلب الطالب مباشرة دون أسئلة غير ضرورية.",
+        "افهم مقصد الطالب أولًا، ثم قدّم إجابة دقيقة ومباشرة تناسب سؤاله ومستواه.",
+        "في الرياضيات والعلوم، حلّل المسألة بعناية، وقدّم الحل الصحيح بخطوات واضحة عندما يحتاج الطالب إلى الشرح، مع كتابة المعادلات والرموز بصورة صحيحة.",
+        "في الأسئلة الدراسية، اشرح المفاهيم بطريقة مبسطة تساعد على الفهم، وميّز بين المعلومة المؤكدة وما يحتاج إلى تحقق.",
+        "تعامل مع الصور والمرفقات وفق محتواها، واستخرج السؤال منها بدقة قبل الإجابة، ووضّح أي جزء غير مقروء بدلًا من تخمينه.",
+        "اتبع تعليمات الطالب المحددة ما دامت لا تتعارض مع الدقة وسلامة الإجابة.",
+        "ابدأ بالإجابة مباشرة، وتجنب المقدمات الطويلة والتكرار وإعادة صياغة السؤال دون حاجة.",
+        "استخدم فقرات قصيرة، واترك سطرًا فارغًا بينها، وأضف عناوين Markdown موجزة عندما تحسن تنظيم الإجابة.",
+        "استخدم القوائم عند الحاجة، والجداول فقط عندما تسهّل المقارنة أو تنظيم المعلومات فعلًا.",
+        "نسّق المعادلات الرياضية باستخدام LaTeX، واستخدم الرموز والوحدات العلمية بدقة.",
+        "اجعل طول الإجابة متناسبًا مع السؤال: مختصرة للطلبات المباشرة، ومفصلة عندما يتطلب الموضوع شرحًا.",
+        "لا تذكر أنك فهيم أو تعرّف بنفسك إلا إذا سُئلت عن هويتك.",
+        "لا تختلق معلومات أو مصادر أو نتائج، وإذا لم تكن متأكدًا فوضّح ذلك باختصار.",
+        "إذا كان الطلب واضحًا، نفّذه مباشرة دون أسئلة غير ضرورية، ولا تطلب توضيحات إلا عندما تكون ضرورية للإجابة الصحيحة.",
     )
 )
 
@@ -1186,6 +1196,49 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json(get_database().admin_statistics())
             return
 
+        if self.path == "/api/admin/online-users":
+            if not user:
+                self.send_unauthorized()
+                return
+            if not self.is_admin(user):
+                self.send_json({"error": "ليس لديك صلاحية لعرض المستخدمين المتصلين."}, 403)
+                return
+            try:
+                online_users = get_database().get_online_user_count()
+            except Database.error_types as error:
+                print(f"[ONLINE] Failed to load live-user count: {error}", flush=True)
+                self.send_json(
+                    {"error": "تعذّر تحديث عدد المستخدمين المتصلين."}, 503
+                )
+                return
+            self.send_json(
+                {"onlineUsers": online_users, "updatedAt": int(time.time())}
+            )
+            return
+
+        admin_conversations_match = re.fullmatch(
+            r"/api/admin/users/([a-f0-9]{32})/conversations", self.path
+        )
+        if admin_conversations_match:
+            if not user:
+                self.send_unauthorized()
+                return
+            if not self.is_admin(user):
+                self.send_json(
+                    {"error": "ليس لديك صلاحية لعرض محادثات المستخدمين."}, 403
+                )
+                return
+            try:
+                conversations = get_database().list_conversations(
+                    admin_conversations_match.group(1)
+                )
+            except Database.error_types as error:
+                print(f"[ADMIN] Failed to list user conversations: {error}", flush=True)
+                self.send_json({"error": "تعذّر تحميل محادثات المستخدم."}, 500)
+                return
+            self.send_json({"conversations": conversations})
+            return
+
         if self.path == "/api/admin/support-messages":
             if not user:
                 self.send_unauthorized()
@@ -2036,6 +2089,37 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True, "deleted": deleted if isinstance(deleted, int) else None})
             return
 
+        admin_conversation_match = re.fullmatch(
+            r"/api/admin/users/([a-f0-9]{32})/conversations/([a-f0-9]{32})",
+            self.path,
+        )
+        if admin_conversation_match:
+            user = self.current_user()
+            if not user:
+                self.send_unauthorized()
+                return
+            if not self.is_admin(user):
+                self.send_json(
+                    {"error": "ليس لديك صلاحية لحذف محادثات المستخدمين."}, 403
+                )
+                return
+            try:
+                deleted = get_database().delete_conversation(
+                    admin_conversation_match.group(1),
+                    admin_conversation_match.group(2),
+                )
+            except Database.error_types as error:
+                print(f"[ADMIN] Failed to delete user conversation: {error}", flush=True)
+                self.send_json({"error": "تعذّر حذف المحادثة من قاعدة البيانات."}, 500)
+                return
+            if not deleted:
+                self.send_json({"error": "المحادثة غير موجودة لهذا المستخدم."}, 404)
+                return
+            self.send_response(204)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+
         admin_match = re.fullmatch(r"/api/admin/users/([a-f0-9]{32})", self.path)
         if admin_match:
             user = self.current_user()
@@ -2052,11 +2136,16 @@ class ChatHandler(SimpleHTTPRequestHandler):
             primary_admin_email = os.environ.get(
                 "ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL
             ).strip()
-            result = get_database().delete_user(
-                target_user_id,
-                primary_admin_email,
-                self.is_primary_admin(user),
-            )
+            try:
+                result = get_database().delete_user(
+                    target_user_id,
+                    primary_admin_email,
+                    self.is_primary_admin(user),
+                )
+            except Database.error_types as error:
+                print(f"[ADMIN] Failed to delete user: {error}", flush=True)
+                self.send_json({"error": "تعذّر حذف المستخدم من قاعدة البيانات."}, 500)
+                return
             if result == "primary_admin":
                 self.send_json(
                     {"error": "لا يمكن حذف حساب الأدمن الأساسي."}, 400
@@ -2084,7 +2173,15 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if not user:
             self.send_unauthorized()
             return
-        if not get_database().delete_conversation(user["id"], match.group(1)):
+        try:
+            deleted = get_database().delete_conversation(
+                user["id"], match.group(1)
+            )
+        except Database.error_types as error:
+            print(f"[CHAT] Failed to delete conversation: {error}", flush=True)
+            self.send_json({"error": "تعذّر حذف المحادثة من قاعدة البيانات."}, 500)
+            return
+        if not deleted:
             self.send_json({"error": "المحادثة غير موجودة."}, 404)
             return
         self.send_response(204)

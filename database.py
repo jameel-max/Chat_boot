@@ -90,7 +90,8 @@ class Database:
                     user_id TEXT NOT NULL
                         REFERENCES users(id)
                         ON DELETE CASCADE,
-                    expires_at INTEGER NOT NULL
+                    expires_at INTEGER NOT NULL,
+                    last_activity_at INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS admin_users (
@@ -220,6 +221,20 @@ class Database:
 
                 connection.execute(
                     """
+                    ALTER TABLE sessions
+                    ADD COLUMN IF NOT EXISTS
+                    last_activity_at INTEGER NOT NULL DEFAULT 0
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS sessions_last_activity_idx
+                    ON sessions(last_activity_at, expires_at, user_id)
+                    """
+                )
+
+                connection.execute(
+                    """
                     ALTER TABLE messages
                     ADD COLUMN IF NOT EXISTS idempotency_key TEXT
                     """
@@ -281,6 +296,29 @@ class Database:
                 )
 
             else:
+
+                session_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(sessions)"
+                    ).fetchall()
+                }
+
+                if "last_activity_at" not in session_columns:
+                    connection.execute(
+                        """
+                        ALTER TABLE sessions
+                        ADD COLUMN last_activity_at
+                        INTEGER NOT NULL DEFAULT 0
+                        """
+                    )
+
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS sessions_last_activity_idx
+                    ON sessions(last_activity_at, expires_at, user_id)
+                    """
+                )
 
                 user_columns = {
                     row["name"]
@@ -1094,6 +1132,11 @@ class Database:
                     users.name,
                     users.phone,
                     users.created_at,
+                    (
+                        SELECT COUNT(*)
+                        FROM conversations
+                        WHERE conversations.user_id = users.id
+                    ) AS conversation_count,
 
                     CASE
                         WHEN admin_users.user_id IS NOT NULL
@@ -1918,6 +1961,7 @@ class Database:
     ):
 
         token = secrets.token_urlsafe(32)
+        now = int(time.time())
 
         with self.connect() as connection:
 
@@ -1927,14 +1971,16 @@ class Database:
                     (
                         token_hash,
                         user_id,
-                        expires_at
+                        expires_at,
+                        last_activity_at
                     )
-                VALUES (?, ?, ?)
+                VALUES (?, ?, ?, ?)
                 """,
                 (
                     self.hash_session(token),
                     user_id,
-                    int(time.time()) + lifetime,
+                    now + lifetime,
+                    now,
                 ),
             )
 
@@ -1943,7 +1989,7 @@ class Database:
                 DELETE FROM sessions
                 WHERE expires_at <= ?
                 """,
-                (int(time.time()),),
+                (now,),
             )
 
         return token
@@ -1956,7 +2002,24 @@ class Database:
         if not token:
             return None
 
+        now = int(time.time())
         with self.connect() as connection:
+
+            connection.execute(
+                """
+                UPDATE sessions
+                SET last_activity_at = ?
+                WHERE token_hash = ?
+                  AND expires_at > ?
+                  AND last_activity_at <= ?
+                """,
+                (
+                    now,
+                    self.hash_session(token),
+                    now,
+                    now - 10,
+                ),
+            )
 
             row = connection.execute(
                 """
@@ -1971,7 +2034,7 @@ class Database:
                 """,
                 (
                     self.hash_session(token),
-                    int(time.time()),
+                    now,
                 ),
             ).fetchone()
 
@@ -1980,6 +2043,20 @@ class Database:
             if row
             else None
         )
+
+    def get_online_user_count(self, now=None):
+        now = int(time.time()) if now is None else int(now)
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(DISTINCT user_id) AS online_users
+                FROM sessions
+                WHERE last_activity_at >= ?
+                  AND expires_at > ?
+                """,
+                (now - 60, now),
+            ).fetchone()
+        return int(row["online_users"])
 
     def delete_session(
         self,

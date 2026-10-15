@@ -1503,6 +1503,117 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual(status, 204)
         self.assertEqual(server.database.list_conversations(self.user["id"]), [])
 
+    def test_admin_can_delete_only_target_users_conversations(self):
+        first = server.database.prepare_user_message(
+            self.user["id"], None, "first-key", "المحادثة الأولى", None, None
+        )
+        second = server.database.prepare_user_message(
+            self.user["id"], None, "second-key", "المحادثة الثانية", None, None
+        )
+        other_user = server.database.register_user(
+            "admin@example.com", "admin-long-password"
+        )
+        admin_token = server.database.create_session(other_user["id"])
+
+        status, denied, _ = self.request(
+            "GET",
+            f"/api/admin/users/{self.user['id']}/conversations",
+            authorized=False,
+        )
+        self.assertEqual(status, 401)
+        status, denied, _ = self.request(
+            "DELETE",
+            f"/api/admin/users/{self.user['id']}/conversations/{first['id']}",
+        )
+        self.assertEqual(status, 403)
+
+        with patch.dict(server.os.environ, {"ADMIN_EMAIL": "admin@example.com"}):
+            self.session_token = admin_token
+            status, conversations, _ = self.request(
+                "GET", f"/api/admin/users/{self.user['id']}/conversations"
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(
+                {item["id"] for item in conversations["conversations"]},
+                {first["id"], second["id"]},
+            )
+            status, dashboard, _ = self.request("GET", "/api/admin/dashboard")
+            self.assertEqual(status, 200)
+            target_user = next(
+                user for user in dashboard["users"] if user["id"] == self.user["id"]
+            )
+            self.assertEqual(target_user["conversation_count"], 2)
+
+            status, _, _ = self.request(
+                "DELETE",
+                f"/api/admin/users/{other_user['id']}/conversations/{first['id']}",
+            )
+            self.assertEqual(status, 404)
+            self.assertEqual(
+                len(server.database.list_conversations(self.user["id"])), 2
+            )
+
+            status, _, _ = self.request(
+                "DELETE",
+                f"/api/admin/users/{self.user['id']}/conversations/{first['id']}",
+            )
+            self.assertEqual(status, 204)
+            self.assertEqual(
+                [item["id"] for item in server.database.list_conversations(self.user["id"])],
+                [second["id"]],
+            )
+            self.assertIsNotNone(
+                server.database.get_session_user(self.session_token)
+            )
+            status, dashboard, _ = self.request("GET", "/api/admin/dashboard")
+            self.assertEqual(status, 200)
+            target_user = next(
+                user for user in dashboard["users"] if user["id"] == self.user["id"]
+            )
+            self.assertEqual(target_user["conversation_count"], 1)
+            with server.database.connect() as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM messages WHERE conversation_id = ?",
+                        (first["id"],),
+                    ).fetchone()[0],
+                    0,
+                )
+
+    def test_conversation_delete_database_failure_is_reported(self):
+        record = server.database.prepare_user_message(
+            self.user["id"], None, "delete-failure", "سؤال", None, None
+        )
+        with patch.object(
+            server.database,
+            "delete_conversation",
+            side_effect=sqlite3.OperationalError("database unavailable"),
+        ):
+            status, result, _ = self.request(
+                "DELETE", f"/api/conversations/{record['id']}"
+            )
+        self.assertEqual(status, 500)
+        self.assertIn("تعذّر حذف المحادثة", result["error"])
+        self.assertEqual(len(server.database.list_conversations(self.user["id"])), 1)
+
+    def test_admin_user_delete_database_failure_is_reported(self):
+        admin = server.database.register_user(
+            "admin@example.com", "admin-long-password"
+        )
+        self.session_token = server.database.create_session(admin["id"])
+        with patch.dict(server.os.environ, {"ADMIN_EMAIL": "admin@example.com"}):
+            with patch.object(
+                server.database,
+                "delete_user",
+                side_effect=sqlite3.OperationalError("database unavailable"),
+            ):
+                status, result, _ = self.request(
+                    "DELETE", f"/api/admin/users/{self.user['id']}"
+                )
+        self.assertEqual(status, 500)
+        self.assertIn("تعذّر حذف المستخدم", result["error"])
+        self.assertIsNotNone(server.database.get_session_user(self.session_token))
+
     def test_registers_and_logs_in_with_persistent_session(self):
         full_name = "محمد أحمد علي الحسن"
         email = server.student_email(server.name_tokens(full_name))
@@ -2058,8 +2169,111 @@ class ChatApiTests(unittest.TestCase):
             self.assertEqual(status, 204)
             self.assertIsNotNone(server.database.get_session_user(secondary_session))
 
+    def test_online_users_are_distinct_and_expire_after_sixty_seconds(self):
+        database = server.database
+        second_user = database.register_user(
+            "second-student@example.com", "correct-horse-battery"
+        )
+        second_tab_session = database.create_session(self.user["id"])
+        second_user_session = database.create_session(second_user["id"])
+        expired_session = database.create_session(second_user["id"], lifetime=-1)
+
+        self.assertEqual(database.get_online_user_count(), 2)
+
+        stale_at = int(server.time.time()) - 61
+        with database.connect() as connection:
+            connection.execute(
+                "UPDATE sessions SET last_activity_at = ? WHERE user_id = ?",
+                (stale_at, self.user["id"]),
+            )
+        self.assertEqual(database.get_online_user_count(), 1)
+
+        status, identity, _ = self.request("GET", "/api/me")
+        self.assertEqual(status, 200)
+        self.assertEqual(identity["user"]["id"], self.user["id"])
+        self.assertEqual(database.get_online_user_count(), 2)
+
+        database.delete_session(second_tab_session)
+        self.assertEqual(database.get_online_user_count(), 2)
+        database.delete_session(self.session_token)
+        self.assertEqual(database.get_online_user_count(), 1)
+        database.delete_session(second_user_session)
+        self.assertEqual(database.get_online_user_count(), 0)
+        self.assertIsNone(database.get_session_user(expired_session))
+
+    def test_online_users_endpoint_requires_admin_and_reports_database_errors(self):
+        status, _, _ = self.request(
+            "GET", "/api/admin/online-users", authorized=False
+        )
+        self.assertEqual(status, 401)
+
+        status, _, _ = self.request("GET", "/api/admin/online-users")
+        self.assertEqual(status, 403)
+
+        with server.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO admin_users (user_id, granted_at)
+                VALUES (?, ?)
+                """,
+                (self.user["id"], int(server.time.time())),
+            )
+
+        status, result, _ = self.request("GET", "/api/admin/online-users")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["onlineUsers"], 1)
+        self.assertIsInstance(result["updatedAt"], int)
+
+        with patch.object(
+            server.database,
+            "get_online_user_count",
+            side_effect=sqlite3.OperationalError("database unavailable"),
+        ):
+            status, result, _ = self.request("GET", "/api/admin/online-users")
+        self.assertEqual(status, 503)
+        self.assertIn("تعذّر تحديث", result["error"])
+
+        status, _, _ = self.request("POST", "/api/logout")
+        self.assertEqual(status, 204)
+        self.assertEqual(server.database.get_online_user_count(), 0)
+
 
 class DatabaseContextTests(unittest.TestCase):
+    def test_migrates_existing_sessions_for_live_activity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            database_path = Path(folder) / "legacy-sessions.sqlite3"
+            connection = sqlite3.connect(database_path)
+            try:
+                connection.execute(
+                    """
+                    CREATE TABLE sessions (
+                        token_hash TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        expires_at INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            migrated_database = server.Database(database_path)
+            with migrated_database.connect() as migrated_connection:
+                columns = {
+                    row["name"]
+                    for row in migrated_connection.execute(
+                        "PRAGMA table_info(sessions)"
+                    ).fetchall()
+                }
+                indexes = {
+                    row["name"]
+                    for row in migrated_connection.execute(
+                        "PRAGMA index_list(sessions)"
+                    ).fetchall()
+                }
+            self.assertIn("last_activity_at", columns)
+            self.assertIn("sessions_last_activity_idx", indexes)
+
     def test_visit_counts_are_deduplicated_and_persist_after_database_reopen(self):
         with tempfile.TemporaryDirectory() as folder:
             database_path = Path(folder) / "visits.sqlite3"

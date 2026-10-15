@@ -13,11 +13,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script>try{var t=localStorage.getItem("faheem_theme"),d=t==="dark"||t==="light"?t:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=d;document.querySelector('meta[name="theme-color"]').content=d==="dark"?"#101114":"#ffffff"}catch(e){document.documentElement.dataset.theme=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}</script>
     <script>try{if(!localStorage.getItem("faheem_logged_in_before"))location.replace("/login.html")}catch(e){}</script>
-    <link rel="stylesheet" href="/style.css?v=24">
-    <link rel="stylesheet" href="/extras.css?v=8">
+    <link rel="stylesheet" href="/style.css?v=26">
+    <link rel="stylesheet" href="/extras.css?v=9">
     <link rel="stylesheet" href="/theme.css?v=4">
     <script>try{if(localStorage.getItem("faheem_sidebar_collapsed")==="1")document.documentElement.classList.add("sidebar-collapsed")}catch(e){}</script>
-    <script src="/app.js?v=53" defer></script>
+    <script src="/app.js?v=55" defer></script>
   </head>
   <body>
     <div class="app-loader" id="app-loader" role="status" aria-live="polite" aria-label="جارٍ التحميل">
@@ -66,9 +66,18 @@
           <div class="sidebar-avatar" id="user-avatar-fallback">ف</div>
           <div class="profile-copy"><strong id="profile-name">مساحتك الخاصة</strong></div>
           <div class="profile-settings hidden" id="profile-settings">
-            <button class="profile-settings-toggle" id="profile-settings-toggle" type="button" aria-label="الإعدادات" title="الإعدادات">
+            <button class="profile-settings-toggle" id="profile-settings-toggle" type="button" aria-label="قائمة الحساب" aria-haspopup="menu" aria-expanded="false" aria-controls="profile-settings-menu" title="قائمة الحساب">
               <img src="settings-svgrepo-com.svg" alt="">
             </button>
+            <div class="profile-settings-menu hidden" id="profile-settings-menu" role="menu" aria-label="قائمة الحساب">
+              <div class="profile-menu-user">
+                <span class="profile-menu-avatar" aria-hidden="true">ف</span>
+                <span class="profile-menu-identity"><strong id="profile-menu-name"></strong><small id="profile-menu-email"></small></span>
+              </div>
+              <div class="profile-menu-divider" aria-hidden="true"></div>
+              <button class="profile-settings-action" id="open-settings" type="button" role="menuitem"><span aria-hidden="true">⚙</span> الإعدادات</button>
+              <button class="profile-settings-action profile-menu-logout" id="logout-button" type="button" role="menuitem"><span aria-hidden="true">⇥</span> تسجيل الخروج</button>
+            </div>
           </div>
         </div>
       </aside>
@@ -139,59 +148,68 @@
     <section class="settings-overlay hidden" id="settings-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="settings-panel">
         <header class="settings-header">
-          <button class="settings-back" id="close-settings" type="button" aria-label="إغلاق الإعدادات">→ <span>رجوع</span></button>
-          <div><span class="settings-eyebrow">مساحتك في فهيم</span><h1 id="settings-title">الإعدادات</h1></div>
-          <img src="/school-logo.png" alt="" class="settings-logo">
+          <div class="settings-heading"><img src="/school-logo.png" alt="" class="settings-logo"><div><span class="settings-eyebrow">مساحتك في فهيم</span><h1 id="settings-title">الإعدادات</h1></div></div>
+          <button class="settings-close" id="close-settings" type="button" aria-label="إغلاق الإعدادات" title="إغلاق">×</button>
         </header>
-        <div class="settings-content">
-          <section class="settings-card" id="username-settings">
-            <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">◉</span><div><h2>اسم المستخدم</h2><p>استخدم اسمك العربي الرباعي لتسجيل الدخول والتعرّف عليك.</p></div></div>
-            <form class="settings-form" id="username-form">
-              <label for="username-input">الاسم الجديد</label>
-              <input id="username-input" type="text" autocomplete="name" maxlength="80" required placeholder="الاسم، اسم الأب، اسم الجد، العائلة">
-              <small>أربعة أسماء عربية، دون أرقام أو رموز.</small>
-              <button class="settings-submit" id="username-submit" type="submit">حفظ الاسم</button>
-            </form>
-            <p class="settings-message" id="username-message" role="status" aria-live="polite"></p>
-          </section>
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="أقسام الإعدادات">
+            <button class="settings-nav-item active" type="button" data-settings-target="appearance" aria-current="page"><span aria-hidden="true">◐</span> المظهر</button>
+            <button class="settings-nav-item" type="button" data-settings-target="account"><span aria-hidden="true">◉</span> الحساب</button>
+            <button class="settings-nav-item" type="button" data-settings-target="security"><span aria-hidden="true">⌑</span> الأمان</button>
+          </nav>
+          <div class="settings-pages">
+            <section class="settings-page active" id="settings-appearance" data-settings-page="appearance" aria-labelledby="settings-appearance-title">
+              <div class="settings-page-heading"><h2 id="settings-appearance-title">المظهر</h2><p>اختر المظهر الذي تفضّله. سيُحفظ اختيارك على حسابك.</p></div>
+              <section class="settings-card">
+                <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">◐</span><div><h3>لون الواجهة</h3><p>غيّر مظهر فهيم في جميع أجهزتك.</p></div></div>
+                <div class="settings-theme-options" role="group" aria-label="اختيار المظهر">
+                  <button class="settings-theme-option" type="button" data-theme-option="light" aria-pressed="false"><span aria-hidden="true">☀</span> فاتح</button>
+                  <button class="settings-theme-option" type="button" data-theme-option="dark" aria-pressed="false"><span aria-hidden="true">☾</span> داكن</button>
+                </div>
+              </section>
+            </section>
 
-          <section class="settings-card" id="phone-settings">
-            <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">⌕</span><div><h2>رقم الهاتف</h2><p>حدّث رقم هاتفك الأردني المرتبط بحسابك.</p></div></div>
-            <form class="settings-form" id="phone-form">
-              <label for="phone-input">رقم الهاتف الجديد</label>
-              <input id="phone-input" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" dir="ltr" required placeholder="079 123 4567 أو +962 79 123 4567">
-              <small>يُقبل الرقم الأردني بصيغة 077 أو 078 أو 079.</small>
-              <button class="settings-submit" id="phone-submit" type="submit">حفظ رقم الهاتف</button>
-            </form>
-            <p class="settings-message" id="phone-message" role="status" aria-live="polite"></p>
-          </section>
+            <section class="settings-page hidden" id="settings-account" data-settings-page="account" aria-labelledby="settings-account-title">
+              <div class="settings-page-heading"><h2 id="settings-account-title">الحساب</h2><p>إدارة المعلومات المرتبطة بحساب فهيم.</p></div>
+              <section class="settings-card" id="username-settings">
+                <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">◉</span><div><h2>اسم المستخدم</h2><p>استخدم اسمك العربي الرباعي لتسجيل الدخول والتعرّف عليك.</p></div></div>
+                <form class="settings-form" id="username-form">
+                  <label for="username-input">الاسم الجديد</label>
+                  <input id="username-input" type="text" autocomplete="name" maxlength="80" required placeholder="الاسم، اسم الأب، اسم الجد، العائلة">
+                  <small>أربعة أسماء عربية، دون أرقام أو رموز.</small>
+                  <button class="settings-submit" id="username-submit" type="submit">حفظ الاسم</button>
+                </form>
+                <p class="settings-message" id="username-message" role="status" aria-live="polite"></p>
+              </section>
 
-          <section class="settings-card">
-            <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">◐</span><div><h2>المظهر</h2><p>اختر المظهر المريح لك، وسيُحفظ على حسابك.</p></div></div>
-            <div class="settings-theme-options" role="group" aria-label="اختيار المظهر">
-              <button class="settings-theme-option" type="button" data-theme-option="light" aria-pressed="false"><span aria-hidden="true">☀</span> فاتح</button>
-              <button class="settings-theme-option" type="button" data-theme-option="dark" aria-pressed="false"><span aria-hidden="true">☾</span> داكن</button>
-            </div>
-          </section>
-
-          <section class="settings-card">
-            <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">⌑</span><div><h2>تغيير كلمة المرور</h2><p>اختر كلمة مرور جديدة لا تقل عن 10 أحرف.</p></div></div>
-            <form class="settings-form" id="change-password-form">
-              <label for="current-password">كلمة المرور الحالية</label>
-              <div class="password-field"><input id="current-password" type="password" autocomplete="current-password" required maxlength="128"><button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button></div>
-              <label for="new-password">كلمة المرور الجديدة</label>
-              <div class="password-field"><input id="new-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128"><button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button></div>
-              <label for="confirm-password">تأكيد كلمة المرور الجديدة</label>
-              <div class="password-field"><input id="confirm-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128"><button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button></div>
-              <button class="settings-submit" id="change-password-submit" type="submit">حفظ كلمة المرور</button>
-            </form>
-            <p class="settings-message" id="password-error" role="alert" aria-live="polite"></p>
-          </section>
-
-          <section class="settings-card settings-logout-card">
-            <div><h2>تسجيل الخروج</h2><p>إنهاء الجلسة على هذا الجهاز.</p></div>
-            <button class="settings-logout" id="logout-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5m5 5H3m9-9h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"></path></svg> تسجيل الخروج</button>
-          </section>
+              <section class="settings-card" id="phone-settings">
+                <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">⌕</span><div><h2>رقم الهاتف</h2><p>حدّث رقم هاتفك الأردني المرتبط بحسابك.</p></div></div>
+                <form class="settings-form" id="phone-form">
+                  <label for="phone-input">رقم الهاتف الجديد</label>
+                  <input id="phone-input" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" dir="ltr" required placeholder="079 123 4567 أو +962 79 123 4567">
+                  <small>يُقبل الرقم الأردني بصيغة 077 أو 078 أو 079.</small>
+                  <button class="settings-submit" id="phone-submit" type="submit">حفظ رقم الهاتف</button>
+                </form>
+                <p class="settings-message" id="phone-message" role="status" aria-live="polite"></p>
+              </section>
+            </section>
+            <section class="settings-page hidden" id="settings-security" data-settings-page="security" aria-labelledby="settings-security-title">
+              <div class="settings-page-heading"><h2 id="settings-security-title">الأمان</h2><p>حافظ على أمان حسابك بتحديث كلمة المرور بانتظام.</p></div>
+              <section class="settings-card">
+                <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">⌑</span><div><h3>تغيير كلمة المرور</h3><p>اختر كلمة مرور جديدة لا تقل عن 10 أحرف.</p></div></div>
+                <form class="settings-form" id="change-password-form">
+                  <label for="current-password">كلمة المرور الحالية</label>
+                  <div class="password-field"><input id="current-password" type="password" autocomplete="current-password" required maxlength="128"><button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button></div>
+                  <label for="new-password">كلمة المرور الجديدة</label>
+                  <div class="password-field"><input id="new-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128"><button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button></div>
+                  <label for="confirm-password">تأكيد كلمة المرور الجديدة</label>
+                  <div class="password-field"><input id="confirm-password" type="password" autocomplete="new-password" required minlength="10" maxlength="128"><button class="password-toggle" type="button" aria-label="إظهار كلمة المرور" aria-pressed="false">إظهار</button></div>
+                  <button class="settings-submit" id="change-password-submit" type="submit">حفظ كلمة المرور</button>
+                </form>
+                <p class="settings-message" id="password-error" role="alert" aria-live="polite"></p>
+              </section>
+            </section>
+          </div>
         </div>
       </div>
     </section>
@@ -235,6 +253,7 @@
           <button class="admin-close" id="close-admin" type="button" aria-label="إغلاق لوحة الأدمن"><img class="close-icon" src="/close.png" alt=""></button>
         </div>
         <div class="admin-stats">
+          <div class="admin-stat admin-online-stat"><strong id="admin-online-users">—</strong><span><span aria-hidden="true">●</span> متصلون الآن</span><small id="admin-online-status" role="status" aria-live="polite">جارٍ التحديث...</small></div>
           <div class="admin-stat"><strong id="admin-page-views">—</strong><span>مرات فتح الموقع</span></div>
           <div class="admin-stat"><strong id="admin-unique-visitors">—</strong><span>الزوار الفريدون</span></div>
           <div class="admin-stat"><strong id="admin-user-count">—</strong><span>المستخدمون</span></div>

@@ -36,8 +36,14 @@ const helpError = document.querySelector("#help-error");
 const profileName = document.querySelector("#profile-name");
 const profileSettings = document.querySelector("#profile-settings");
 const profileSettingsToggle = document.querySelector("#profile-settings-toggle");
+const profileSettingsMenu = document.querySelector("#profile-settings-menu");
+const profileMenuName = document.querySelector("#profile-menu-name");
+const profileMenuEmail = document.querySelector("#profile-menu-email");
+const openSettingsButton = document.querySelector("#open-settings");
 const settingsOverlay = document.querySelector("#settings-overlay");
 const closeSettingsButton = document.querySelector("#close-settings");
+const settingsNavItems = [...document.querySelectorAll("[data-settings-target]")];
+const settingsPages = [...document.querySelectorAll("[data-settings-page]")];
 const usernameSettings = document.querySelector("#username-settings");
 const usernameForm = document.querySelector("#username-form");
 const usernameInput = document.querySelector("#username-input");
@@ -57,6 +63,8 @@ const adminPageViews = document.querySelector("#admin-page-views");
 const adminUniqueVisitors = document.querySelector("#admin-unique-visitors");
 const adminUserCount = document.querySelector("#admin-user-count");
 const adminAdminCount = document.querySelector("#admin-admin-count");
+const adminOnlineUsers = document.querySelector("#admin-online-users");
+const adminOnlineStatus = document.querySelector("#admin-online-status");
 const adminUsers = document.querySelector("#admin-users");
 const adminEmpty = document.querySelector("#admin-empty");
 const adminUserSearch = document.querySelector("#admin-user-search");
@@ -1293,6 +1301,8 @@ function redirectToLogin(reason = "") {
 function setAuthenticated(user, isAdmin = false, isPrimaryAdmin = false) {
   currentUser = { ...user, isAdmin, isPrimaryAdmin };
   profileName.textContent = user.name;
+  profileMenuName.textContent = user.name || "حساب فهيم";
+  profileMenuEmail.textContent = user.email || "";
   usernameSettings.classList.toggle("hidden", !user.isStudentAccount);
   phoneSettings.classList.toggle("hidden", !user.isStudentAccount);
   usernameInput.value = user.name || "";
@@ -1319,9 +1329,10 @@ function setAuthenticated(user, isAdmin = false, isPrimaryAdmin = false) {
 
 async function loadAdminDashboard() {
   adminError.textContent = "";
-  adminUsers.replaceChildren();
+  refreshAdminOnlineUsers();
   try {
     const result = await apiRequest("/api/admin/dashboard");
+    adminUsers.replaceChildren();
     adminPageViews.textContent = Number(result.pageViews).toLocaleString("ar");
     adminUniqueVisitors.textContent = Number(result.uniqueVisitors).toLocaleString("ar");
     const users = result.users.filter((user) => !user.is_admin).length;
@@ -1343,6 +1354,17 @@ async function loadAdminDashboard() {
       const isOtherUser = user.id !== currentUser.id;
       const canManageSensitiveActions = isOtherUser
         && (!isAdmin || currentUser.isPrimaryAdmin);
+      if (isOtherUser && !isPrimaryAdmin && !isAdmin) {
+        const conversations = document.createElement("button");
+        conversations.type = "button";
+        conversations.className = "admin-conversations-action";
+        conversations.textContent = `المحادثات (${Number(user.conversation_count) || 0})`;
+        conversations.setAttribute("aria-expanded", "false");
+        conversations.addEventListener("click", () => {
+          toggleAdminConversations(user, row, conversations);
+        });
+        action.append(conversations);
+      }
       const role = document.createElement("span");
       role.className = isAdmin ? "admin-role-badge active" : "admin-role-badge";
       role.textContent = isPrimaryAdmin
@@ -1413,15 +1435,24 @@ async function loadAdminDashboard() {
             return;
           }
           remove.disabled = true;
+          const detailRow = row.nextElementSibling;
+          if (detailRow?.classList.contains("admin-conversations-row")) {
+            detailRow.remove();
+          }
+          const rowRemoval = animateAdminRowOut(row);
           try {
             await apiRequest(`/api/admin/users/${encodeURIComponent(user.id)}`, {
               method: "DELETE",
             });
-            await loadAdminDashboard();
           } catch (error) {
+            rowRemoval.restore();
             adminError.textContent = error.message;
-            remove.disabled = false;
+            await loadAdminDashboard();
+            return;
           }
+          await rowRemoval.finished;
+          showToast("تم حذف الحساب.");
+          await loadAdminDashboard();
         });
         action.append(remove);
       }
@@ -1434,10 +1465,179 @@ async function loadAdminDashboard() {
   }
 }
 
+function animateAdminRowOut(row) {
+  row.classList.add("is-removing");
+  const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 240;
+  const parent = row.parentElement;
+  const next = row.nextElementSibling;
+  let timer = null;
+  let resolveRemoval;
+  const finished = new Promise((resolve) => {
+    resolveRemoval = resolve;
+    timer = window.setTimeout(() => {
+      row.remove();
+      timer = null;
+      resolve();
+    }, duration);
+  });
+  return {
+    finished,
+    restore: () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+        resolveRemoval();
+      }
+      if (!row.isConnected && parent?.isConnected) {
+        if (next?.parentElement === parent) parent.insertBefore(row, next);
+        else parent.append(row);
+      }
+      row.classList.remove("is-removing");
+    },
+  };
+}
+
+async function toggleAdminConversations(user, accountRow, toggle) {
+  const existing = accountRow.nextElementSibling;
+  if (existing?.classList.contains("admin-conversations-row")) {
+    existing.remove();
+    toggle.setAttribute("aria-expanded", "false");
+    return;
+  }
+  adminUsers.querySelector(".admin-conversations-row")?.remove();
+  adminUsers.querySelectorAll(".admin-conversations-action[aria-expanded='true']")
+    .forEach((button) => button.setAttribute("aria-expanded", "false"));
+
+  const detailRow = document.createElement("tr");
+  detailRow.className = "admin-conversations-row";
+  const cell = document.createElement("td");
+  cell.colSpan = 4;
+  const list = document.createElement("div");
+  list.className = "admin-conversation-list";
+  list.setAttribute("aria-live", "polite");
+  list.textContent = "جارٍ تحميل المحادثات...";
+  cell.append(list);
+  detailRow.append(cell);
+  accountRow.after(detailRow);
+  toggle.setAttribute("aria-expanded", "true");
+
+  const loadConversations = async () => {
+    try {
+      const result = await apiRequest(
+        `/api/admin/users/${encodeURIComponent(user.id)}/conversations`,
+      );
+      list.replaceChildren();
+      if (!result.conversations.length) {
+        list.textContent = "لا توجد محادثات لهذا المستخدم.";
+        return;
+      }
+      for (const conversation of result.conversations) {
+        const item = document.createElement("div");
+        item.className = "admin-conversation-item";
+        const title = document.createElement("span");
+        title.textContent = conversation.title;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "admin-conversation-delete";
+        remove.textContent = "حذف";
+        remove.addEventListener("click", async () => {
+          if (!window.confirm(`هل تريد حذف محادثة «${conversation.title}»؟`)) return;
+          remove.disabled = true;
+          item.classList.add("is-removing");
+          const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220;
+          let timer = null;
+          let resolveRemoval;
+          const removal = new Promise((resolve) => {
+            resolveRemoval = resolve;
+            timer = window.setTimeout(() => {
+              item.remove();
+              timer = null;
+              resolve();
+            }, duration);
+          });
+          const next = item.nextElementSibling;
+          try {
+            await apiRequest(
+              `/api/admin/users/${encodeURIComponent(user.id)}/conversations/${encodeURIComponent(conversation.id)}`,
+              { method: "DELETE" },
+            );
+            await removal;
+            user.conversation_count = Math.max(0, (Number(user.conversation_count) || 0) - 1);
+            toggle.textContent = `المحادثات (${user.conversation_count})`;
+            if (!list.querySelector(".admin-conversation-item")) {
+              list.textContent = "لا توجد محادثات لهذا المستخدم.";
+            }
+            showToast("تم حذف المحادثة.");
+          } catch (error) {
+            if (timer !== null) {
+              window.clearTimeout(timer);
+              timer = null;
+              resolveRemoval();
+            }
+            if (!item.isConnected && list.isConnected) {
+              if (next?.parentElement === list) list.insertBefore(item, next);
+              else list.append(item);
+            }
+            item.classList.remove("is-removing");
+            remove.disabled = false;
+            adminError.textContent = error.message;
+            try {
+              await loadConversations();
+            } catch (refreshError) {
+              showToast(`تعذّر حذف المحادثة: ${refreshError.message}`);
+            }
+          }
+        });
+        item.append(title, remove);
+        list.append(item);
+      }
+    } catch (error) {
+      if (!list.querySelector(".admin-conversation-item")) {
+        list.textContent = "تعذّر تحميل المحادثات.";
+      } else {
+        showToast("تعذّر تحديث قائمة المحادثات؛ أُبقيت القائمة كما هي.");
+      }
+      adminError.textContent = error.message;
+    }
+  };
+  await loadConversations();
+}
+
 async function refreshAdminStatistics() {
   const result = await apiRequest("/api/admin/statistics");
   adminPageViews.textContent = Number(result.pageViews).toLocaleString("ar");
   adminUniqueVisitors.textContent = Number(result.uniqueVisitors).toLocaleString("ar");
+}
+
+let adminOnlineRefreshPending = false;
+async function refreshAdminOnlineUsers() {
+  if (adminOnlineRefreshPending || !adminOnlineUsers || !adminOnlineStatus) return;
+  adminOnlineRefreshPending = true;
+  try {
+    const result = await apiRequest("/api/admin/online-users");
+    if (!Number.isSafeInteger(result.onlineUsers) || result.onlineUsers < 0) {
+      throw new Error("استجابة غير صالحة من الخادم.");
+    }
+    adminOnlineUsers.textContent = result.onlineUsers.toLocaleString("ar");
+    const updatedAt = Number.isSafeInteger(result.updatedAt)
+      ? result.updatedAt * 1000
+      : Date.now();
+    adminOnlineStatus.textContent = `آخر تحديث ${new Date(updatedAt).toLocaleTimeString("ar", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })}`;
+    adminOnlineStatus.parentElement.classList.remove("is-stale");
+    adminOnlineStatus.dataset.lastUpdated = String(updatedAt);
+  } catch (error) {
+    adminOnlineStatus.parentElement.classList.add("is-stale");
+    const lastUpdated = Number(adminOnlineStatus.dataset.lastUpdated);
+    adminOnlineStatus.textContent = lastUpdated
+      ? `تعذّر التحديث · آخر تحديث ${new Date(lastUpdated).toLocaleTimeString("ar")}`
+      : "تعذّر التحديث";
+  } finally {
+    adminOnlineRefreshPending = false;
+  }
 }
 
 function closeAdminPasswordDialog() {
@@ -1711,36 +1911,51 @@ async function renameConversation(record) {
   }
 }
 
-// محادثات تُحذف في الخلفية: نخفيها من القائمة فورًا حتى لو أعاد الخادم نسخة قديمة منها
 const pendingDeletes = new Set();
 
-function sendConversationDelete(id, attempt = 0) {
-  fetch(`/api/conversations/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    credentials: "same-origin",
-    cache: "no-store",
-    keepalive: true, // يكتمل الطلب حتى لو أُغلقت الصفحة
-  })
-    .then((response) => {
-      if (response.ok || response.status === 404) {
-        pendingDeletes.delete(id);
-        return;
+function animateHistoryRemoval(entry) {
+  entry.classList.add("is-removing");
+  entry.querySelectorAll("button").forEach((button) => {
+    button.disabled = true;
+  });
+  const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 240;
+  const parent = entry.parentElement;
+  const next = entry.nextElementSibling;
+  let timer = null;
+  let resolveRemoval;
+  const finished = new Promise((resolve) => {
+    resolveRemoval = resolve;
+    timer = window.setTimeout(() => {
+      entry.remove();
+      timer = null;
+      resolve();
+    }, duration);
+  });
+  return {
+    finished,
+    restore: () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+        resolveRemoval();
       }
-      throw new Error(`HTTP ${response.status}`);
-    })
-    .catch(() => {
-      if (attempt < 2) {
-        window.setTimeout(() => sendConversationDelete(id, attempt + 1), 1500 * (attempt + 1));
-        return;
+      const alreadyListed = [...historyList.querySelectorAll(".history-entry")]
+        .some((item) => item.dataset.id === entry.dataset.id);
+      if (!entry.isConnected && !alreadyListed && parent?.isConnected) {
+        if (next?.parentElement === parent) parent.insertBefore(entry, next);
+        else parent.append(entry);
       }
-      pendingDeletes.delete(id);
-      showToast("تعذّر إكمال حذف المحادثة، ستعود إلى القائمة.");
-      loadHistory().catch(() => {});
-    });
+      entry.classList.remove("is-removing");
+      entry.querySelectorAll("button").forEach((button) => {
+        button.disabled = false;
+      });
+    },
+  };
 }
 
-function deleteConversation(record) {
+async function deleteConversation(record) {
   if (!window.confirm(`هل تريد حذف محادثة «${record.title}» نهائيًا؟`)) return;
+  if (pendingDeletes.has(record.id)) return;
   const isActive = currentConversationId === record.id || loadingConversationId === record.id;
   if (isActive && isSending) {
     showToast("انتظر حتى ينتهي فهيم من الرد ثم احذف المحادثة.");
@@ -1748,18 +1963,59 @@ function deleteConversation(record) {
   }
 
   pendingDeletes.add(record.id);
-
-  // 1) إزالة فورية من قائمة المحادثات
-  for (const entry of historyList.querySelectorAll(".history-entry")) {
-    if (entry.dataset.id === record.id) entry.remove();
-  }
-  if (!historyList.querySelector(".history-entry")) renderHistory([]);
-
-  // 2) العودة فورًا إلى الواجهة الرئيسية (شعار المدرسة والاختصارات)
+  const entry = [...historyList.querySelectorAll(".history-entry")]
+    .find((item) => item.dataset.id === record.id);
+  const animation = entry ? animateHistoryRemoval(entry) : null;
   if (isActive) resetChat();
+  const loadTokenAfterReset = conversationLoadToken;
 
-  // 3) الحذف الفعلي من قاعدة البيانات في الخلفية دون انتظار
-  sendConversationDelete(record.id);
+  try {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(record.id)}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      cache: "no-store",
+      keepalive: true,
+    });
+    if (!response.ok && response.status !== 404) {
+      let message = "تعذّر حذف المحادثة من قاعدة البيانات.";
+      try {
+        const result = await response.json();
+        message = result.error || message;
+      } catch {
+        // Use a safe message when the server response is not JSON.
+      }
+      if (response.status === 401) redirectToLogin("expired");
+      throw new Error(message);
+    }
+    if (animation) await animation.finished;
+    pendingDeletes.delete(record.id);
+    if (!historyList.querySelector(".history-entry")) renderHistory([]);
+    showToast("تم حذف المحادثة.");
+  } catch (error) {
+    pendingDeletes.delete(record.id);
+    animation?.restore();
+    let restoreError = null;
+    try {
+      await loadHistory();
+    } catch (refreshError) {
+      restoreError = refreshError;
+    }
+    if (
+      isActive
+      && conversationLoadToken === loadTokenAfterReset
+      && !currentConversationId
+      && !loadingConversationId
+    ) {
+      try {
+        await loadConversation(record.id);
+      } catch (conversationError) {
+        restoreError = conversationError;
+      }
+    }
+    showToast(restoreError
+      ? `${error.message || "تعذّر حذف المحادثة."} وتعذّرت المزامنة، حدّث الصفحة.`
+      : error.message || "تعذّر حذف المحادثة. أُعيدت إلى القائمة.");
+  }
 }
 
 // ===== شاشة التحميل: تظهر أثناء التحقق من الجلسة بدل وميض نافذة تسجيل الدخول =====
@@ -2406,6 +2662,7 @@ function closeSettings() {
   passwordError.textContent = "";
   usernameMessage.textContent = "";
   phoneMessage.textContent = "";
+  if (!profileSettings.classList.contains("hidden")) profileSettingsToggle.focus();
 }
 
 function resetPasswordForm() {
@@ -2503,17 +2760,87 @@ helpCenterForm.addEventListener("submit", async (event) => {
   }
 });
 
-profileSettingsToggle.addEventListener("click", () => {
+function closeProfileMenu() {
+  profileSettingsMenu.classList.add("hidden");
+  profileSettingsToggle.setAttribute("aria-expanded", "false");
+}
+
+function openSettings() {
+  closeProfileMenu();
   usernameMessage.textContent = "";
   settingsOverlay.classList.remove("hidden");
-  if (!usernameSettings.classList.contains("hidden")) usernameInput.focus();
-  else currentPasswordInput.focus();
+  document.querySelector(".settings-nav-item.active")?.focus();
+}
+
+function selectSettingsPage(pageName) {
+  settingsNavItems.forEach((button) => {
+    const selected = button.dataset.settingsTarget === pageName;
+    button.classList.toggle("active", selected);
+    if (selected) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  settingsPages.forEach((page) => {
+    const selected = page.dataset.settingsPage === pageName;
+    page.classList.toggle("hidden", !selected);
+    page.classList.toggle("active", selected);
+  });
+}
+
+profileSettingsToggle.addEventListener("click", () => {
+  const shouldOpen = profileSettingsMenu.classList.contains("hidden");
+  profileSettingsMenu.classList.toggle("hidden", !shouldOpen);
+  profileSettingsToggle.setAttribute("aria-expanded", String(shouldOpen));
+  if (shouldOpen) openSettingsButton.focus();
+});
+openSettingsButton.addEventListener("click", openSettings);
+settingsNavItems.forEach((button) => {
+  button.addEventListener("click", () => selectSettingsPage(button.dataset.settingsTarget));
 });
 closeSettingsButton.addEventListener("click", closeSettings);
+settingsOverlay.addEventListener("click", (event) => {
+  if (event.target === settingsOverlay) closeSettings();
+});
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !settingsOverlay.classList.contains("hidden")) {
-    closeSettings();
+  if (
+    !profileSettingsMenu.classList.contains("hidden")
+    && (event.key === "ArrowDown" || event.key === "ArrowUp")
+  ) {
+    const menuItems = [...profileSettingsMenu.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+    if (menuItems.length) {
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      let index = menuItems.indexOf(document.activeElement);
+      if (index < 0) index = direction > 0 ? -1 : 0;
+      menuItems[(index + direction + menuItems.length) % menuItems.length].focus();
+      event.preventDefault();
+    }
+    return;
   }
+  if (event.key === "Escape") {
+    if (!settingsOverlay.classList.contains("hidden")) closeSettings();
+    else if (!profileSettingsMenu.classList.contains("hidden")) {
+      closeProfileMenu();
+      profileSettingsToggle.focus();
+    }
+    return;
+  }
+  if (event.key === "Tab" && !settingsOverlay.classList.contains("hidden")) {
+    const focusable = [...settingsOverlay.querySelectorAll(
+      'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    )].filter((element) => !element.closest(".hidden"));
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+});
+document.addEventListener("click", (event) => {
+  if (!profileSettings.contains(event.target)) closeProfileMenu();
 });
 
 usernameForm.addEventListener("submit", async (event) => {
@@ -2530,6 +2857,7 @@ usernameForm.addEventListener("submit", async (event) => {
     });
     currentUser.name = result.fullName;
     profileName.textContent = result.fullName;
+    profileMenuName.textContent = result.fullName;
     userAvatarFallback.textContent = result.fullName.slice(0, 1);
     usernameInput.value = result.fullName;
     usernameMessage.textContent = "تم تحديث اسم المستخدم بنجاح.";
@@ -2599,6 +2927,7 @@ changePasswordForm.addEventListener("submit", async (event) => {
 });
 
 logoutButton.addEventListener("click", async () => {
+  logoutButton.disabled = true;
   try {
     await apiRequest("/api/logout", { method: "POST" });
     currentUser = null;
@@ -2607,9 +2936,12 @@ logoutButton.addEventListener("click", async () => {
     welcome.classList.remove("hidden");
     historyList.replaceChildren();
     profileName.textContent = "مساحتك الخاصة";
+    profileMenuName.textContent = "";
+    profileMenuEmail.textContent = "";
     helpCenterButton.classList.add("hidden");
     logoutButton.classList.add("hidden");
     profileSettings.classList.add("hidden");
+    closeProfileMenu();
     settingsOverlay.classList.add("hidden");
     adminButton.classList.add("hidden");
     closeSettings();
@@ -2629,6 +2961,8 @@ logoutButton.addEventListener("click", async () => {
     window.location.replace("/login.html");
   } catch (error) {
     showToast(error.message);
+  } finally {
+    logoutButton.disabled = false;
   }
 });
 
@@ -2650,6 +2984,9 @@ window.setInterval(() => {
     });
   }
 }, 15000);
+window.setInterval(() => {
+  if (!adminOverlay.classList.contains("hidden")) refreshAdminOnlineUsers();
+}, 10000);
 adminUserSearch.addEventListener("input", filterAdminUsers);
 for (const tab of adminTabs) {
   tab.addEventListener("click", () => {

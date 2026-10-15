@@ -84,6 +84,10 @@
     .stat strong { color: var(--text); font-size: 30px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
     .stat.lead strong { color: var(--accent); }
     .stat.alert strong { color: var(--danger); }
+    .stat.online .live-label { display: flex; align-items: center; gap: 7px; }
+    .live-indicator { color: #41c98d; font-size: 10px; }
+    .stat.online small { color: var(--muted); font-size: 10px; }
+    .stat.online.is-stale small { color: #e2a33b; }
 
     .chart-card { display: flex; flex-direction: column; padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
     .chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
@@ -145,6 +149,19 @@
     .whatsapp-link:hover, .whatsapp-link:focus-visible { background: #25d3661f; transform: scale(1.08); }
     td.email { direction: ltr; text-align: right; color: #c9d4d2; overflow-wrap: anywhere; }
     .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    tr.is-removing { animation: admin-row-remove .22s ease forwards; pointer-events: none; }
+    .admin-conversation-toggle, .admin-conversation-delete { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 10px; cursor: pointer; }
+    .admin-conversation-toggle[aria-expanded="true"] { border-color: var(--accent-line); color: var(--accent); }
+    .admin-conversation-list { display: grid; gap: 7px; }
+    .admin-conversation-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+    .admin-conversation-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .admin-conversation-item.is-removing { animation: admin-row-remove .2s ease forwards; pointer-events: none; }
+    .admin-conversation-delete { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
+    @keyframes admin-row-remove { to { opacity: 0; transform: scaleY(.84); } }
+    @media (max-width: 680px) {
+      td.admin-conversation-cell { display: block; padding: 8px 0; }
+      td.admin-conversation-cell::before { display: none; }
+    }
     .badge { display: inline-block; padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
     .badge.admin { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
     .badge.complaint { border-color: var(--danger-line); color: var(--danger); }
@@ -294,10 +311,11 @@
 
     <main>
       <h1 class="page-title">نظرة عامة</h1>
-      <p class="page-sub">إحصاءات الموقع تتحدّث تلقائيًا كل 15 ثانية.</p>
+      <p class="page-sub">المستخدمون المتصلون يتحدّثون كل 10 ثوانٍ، وبقية الإحصاءات كل 15 ثانية.</p>
 
       <div class="overview">
         <div class="stats">
+          <div class="stat lead online"><span class="live-label"><span class="live-indicator" aria-hidden="true">●</span> متصلون الآن</span><strong id="stat-online-users">—</strong><small id="stat-online-status" role="status" aria-live="polite">جارٍ التحديث...</small></div>
           <div class="stat lead"><span>مرات فتح الموقع</span><strong id="stat-views">—</strong></div>
           <div class="stat"><span>الزوار الفريدون</span><strong id="stat-visitors">—</strong></div>
           <div class="stat"><span>المستخدمون</span><strong id="stat-users">—</strong></div>
@@ -410,6 +428,8 @@
     let supportMessages = [];
     let activeTab = "users";
     let statsTimer = null;
+    let onlineTimer = null;
+    let onlineRefreshPending = false;
     let toastTimer = null;
     let passwordTargetId = null;
 
@@ -506,7 +526,7 @@
     async function openDashboard() {
       $("whoami").textContent = me.name || me.email;
       showView("dashboard");
-      await Promise.all([loadDashboard(), loadSupport()]);
+      await Promise.all([loadDashboard(), loadSupport(), refreshOnlineUsers()]);
       startStats();
     }
 
@@ -567,8 +587,46 @@
           $("stat-visitors").textContent = fmt(s.uniqueVisitors);
         } catch (error) { if (error.status === 401) handleError(error); }
       }, 15000);
+      onlineTimer = setInterval(() => {
+        if (!document.hidden) refreshOnlineUsers();
+      }, 10000);
     }
-    function stopStats() { clearInterval(statsTimer); statsTimer = null; }
+    function stopStats() {
+      clearInterval(statsTimer);
+      clearInterval(onlineTimer);
+      statsTimer = onlineTimer = null;
+    }
+
+    async function refreshOnlineUsers() {
+      if (onlineRefreshPending) return;
+      onlineRefreshPending = true;
+      const status = $("stat-online-status");
+      const card = $("stat-online-users").closest(".stat");
+      try {
+        const result = await api("/api/admin/online-users");
+        if (!Number.isSafeInteger(result.onlineUsers) || result.onlineUsers < 0) {
+          throw new Error("استجابة غير صالحة من الخادم.");
+        }
+        $("stat-online-users").textContent = fmt(result.onlineUsers);
+        const updatedAt = Number.isSafeInteger(result.updatedAt)
+          ? result.updatedAt * 1000
+          : Date.now();
+        status.textContent = `آخر تحديث ${new Date(updatedAt).toLocaleTimeString("ar", {
+          hour: "2-digit", minute: "2-digit", second: "2-digit",
+        })}`;
+        status.dataset.lastUpdated = String(updatedAt);
+        card.classList.remove("is-stale");
+      } catch (error) {
+        if (error.status === 401) handleError(error);
+        card.classList.add("is-stale");
+        const lastUpdated = Number(status.dataset.lastUpdated);
+        status.textContent = lastUpdated
+          ? `تعذّر التحديث · آخر تحديث ${new Date(lastUpdated).toLocaleTimeString("ar")}`
+          : "تعذّر التحديث";
+      } finally {
+        onlineRefreshPending = false;
+      }
+    }
 
     function renderChart(users) {
       const DAY = 86400;
@@ -750,6 +808,14 @@
       }
 
       if (canManage && !isPrimary) {
+        if (!isAdmin && !isSelf) {
+          const conversations = el("button", "btn small teal", `المحادثات (${Number(user.conversation_count) || 0})`);
+          conversations.type = "button";
+          conversations.className = "admin-conversation-toggle";
+          conversations.setAttribute("aria-expanded", "false");
+          conversations.addEventListener("click", () => toggleUserConversations(user, row, conversations));
+          actions.append(conversations);
+        }
         const del = el("button", "btn small danger", "حذف");
         del.type = "button";
         del.setAttribute("aria-label", `حذف حساب ${user.is_student ? user.name : user.email}`);
@@ -757,11 +823,43 @@
           const ok = await confirmAction(`سيتم حذف حساب ${user.is_student ? user.name : user.email} وكل محادثاته نهائيًا. لا يمكن التراجع عن ذلك.`, "حذف الحساب");
           if (!ok) return;
           del.disabled = true;
+          const detailsRow = row.nextElementSibling;
+          if (detailsRow?.classList.contains("admin-account-conversations")) detailsRow.remove();
+          row.classList.add("is-removing");
+          const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 240;
+          const parent = row.parentElement;
+          const next = row.nextElementSibling;
+          let rowTimer = null;
+          let resolveRowRemoval;
+          const rowRemoval = new Promise((resolve) => {
+            resolveRowRemoval = resolve;
+            rowTimer = window.setTimeout(() => {
+              row.remove();
+              rowTimer = null;
+              resolve();
+            }, duration);
+          });
           try {
             await api(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: "DELETE" });
-            toast("تم حذف الحساب.");
+          } catch (error) {
+            if (rowTimer !== null) {
+              window.clearTimeout(rowTimer);
+              rowTimer = null;
+              resolveRowRemoval();
+            }
+            if (!row.isConnected && parent?.isConnected) {
+              if (next?.parentElement === parent) parent.insertBefore(row, next);
+              else parent.append(row);
+            }
+            row.classList.remove("is-removing");
+            handleError(error);
             await loadDashboard();
-          } catch (error) { handleError(error); del.disabled = false; }
+            return;
+          }
+          await rowRemoval;
+          row.remove();
+          toast("تم حذف الحساب.");
+          await loadDashboard();
         });
         actions.append(del);
       }
@@ -769,6 +867,97 @@
       actionsCell.append(actions);
       row.append(name, email, created, actionsCell);
       return row;
+    }
+
+    async function toggleUserConversations(user, accountRow, toggle) {
+      const existing = accountRow.nextElementSibling;
+      if (existing?.classList.contains("admin-account-conversations")) {
+        existing.remove();
+        toggle.setAttribute("aria-expanded", "false");
+        return;
+      }
+      $("accounts-body").querySelector(".admin-account-conversations")?.remove();
+      $("accounts-body").querySelectorAll(".admin-conversation-toggle[aria-expanded='true']")
+        .forEach((button) => button.setAttribute("aria-expanded", "false"));
+
+      const detailRow = el("tr", "admin-account-conversations");
+      const cell = el("td", "admin-conversation-cell");
+      cell.colSpan = 4;
+      const list = el("div", "admin-conversation-list", "جارٍ تحميل المحادثات...");
+      list.setAttribute("aria-live", "polite");
+      cell.append(list);
+      detailRow.append(cell);
+      accountRow.after(detailRow);
+      toggle.setAttribute("aria-expanded", "true");
+
+      const loadConversations = async () => {
+        const result = await api(`/api/admin/users/${encodeURIComponent(user.id)}/conversations`);
+        list.replaceChildren();
+        if (!result.conversations.length) {
+          list.textContent = "لا توجد محادثات لهذا المستخدم.";
+          return;
+        }
+        for (const conversation of result.conversations) {
+          const item = el("div", "admin-conversation-item");
+          const title = el("span", "", conversation.title);
+          const remove = el("button", "admin-conversation-delete", "حذف");
+          remove.type = "button";
+          remove.addEventListener("click", async () => {
+            const ok = await confirmAction(`هل تريد حذف محادثة «${conversation.title}»؟`, "حذف المحادثة");
+            if (!ok) return;
+            remove.disabled = true;
+            item.classList.add("is-removing");
+            const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220;
+            const parent = item.parentElement;
+            const next = item.nextElementSibling;
+            let itemTimer = null;
+            let resolveItemRemoval;
+            const animation = new Promise((resolve) => {
+              resolveItemRemoval = resolve;
+              itemTimer = window.setTimeout(() => {
+                item.remove();
+                itemTimer = null;
+                resolve();
+              }, duration);
+            });
+            try {
+              await api(`/api/admin/users/${encodeURIComponent(user.id)}/conversations/${encodeURIComponent(conversation.id)}`, { method: "DELETE" });
+              await animation;
+              user.conversation_count = Math.max(0, (Number(user.conversation_count) || 0) - 1);
+              toggle.textContent = `المحادثات (${user.conversation_count})`;
+              if (!list.querySelector(".admin-conversation-item")) {
+                list.textContent = "لا توجد محادثات لهذا المستخدم.";
+              }
+              toast("تم حذف المحادثة.");
+            } catch (error) {
+              if (itemTimer !== null) {
+                window.clearTimeout(itemTimer);
+                itemTimer = null;
+                resolveItemRemoval();
+              }
+              if (!item.isConnected && parent?.isConnected) {
+                if (next?.parentElement === parent) parent.insertBefore(item, next);
+                else parent.append(item);
+              }
+              item.classList.remove("is-removing");
+              handleError(error);
+              try {
+                await loadConversations();
+              } catch (refreshError) {
+                handleError(refreshError);
+              }
+            }
+          });
+          item.append(title, remove);
+          list.append(item);
+        }
+      };
+      try {
+        await loadConversations();
+      } catch (error) {
+        list.textContent = "تعذّر تحميل المحادثات.";
+        handleError(error);
+      }
     }
 
     $("user-search").addEventListener("input", renderAccounts);
