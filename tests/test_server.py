@@ -1299,6 +1299,38 @@ class ChatApiTests(unittest.TestCase):
             status, inbox, _ = self.request("GET", "/api/admin/support-messages")
             self.assertEqual(inbox["messages"][0]["status"], "resolved")
 
+    def test_authenticated_support_message_uses_account_profile_name(self):
+        full_name = "محمد أحمد علي الحسن"
+        email = server.student_email(server.name_tokens(full_name))
+        student = server.database.register_user(email, "long-enough-password")
+        self.session_token = server.database.create_session(student["id"])
+
+        with patch.object(
+            server.USER_PROFILES,
+            "get",
+            return_value={"fullName": full_name, "grade": "10"},
+        ):
+            status, submitted, _ = self.request(
+                "POST",
+                "/api/support-messages",
+                {
+                    "category": "message",
+                    "content": "أحتاج مساعدة في واجهة الحساب.",
+                },
+            )
+
+        self.assertEqual(status, 201)
+        self.assertGreater(submitted["id"], 0)
+        message = server.database.list_support_messages()[0]
+        self.assertEqual(message["user_name"], full_name)
+        self.assertEqual(message["user_email"], email)
+        with server.database.connect() as connection:
+            owner = connection.execute(
+                "SELECT user_id FROM support_messages WHERE id = ?",
+                (submitted["id"],),
+            ).fetchone()
+        self.assertEqual(owner["user_id"], student["id"])
+
     def test_support_message_rejects_invalid_categories_and_empty_content(self):
         status, result, _ = self.request(
             "POST",
@@ -1331,6 +1363,18 @@ class ChatApiTests(unittest.TestCase):
                 (result["id"],),
             ).fetchone()
         self.assertIsNone(owner["user_id"])
+
+    def test_logged_out_help_request_without_contact_details_requires_login(self):
+        status, result, _ = self.request(
+            "POST",
+            "/api/support-messages",
+            {"category": "message", "content": "أحتاج مساعدة."},
+            authorized=False,
+        )
+
+        self.assertEqual(status, 401)
+        self.assertIn("سجّل الدخول", result["error"])
+        self.assertEqual(server.database.list_support_messages(), [])
 
     def test_logged_out_help_request_requires_valid_email(self):
         status, result, _ = self.request(

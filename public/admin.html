@@ -94,10 +94,13 @@
     .chart-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
     .chart-head span { color: var(--muted); font-size: 11px; }
     .bars { display: flex; flex: 1; align-items: flex-end; gap: 5px; min-height: 96px; margin-top: 14px; direction: ltr; }
-    .bar { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
+    .bar { position: relative; z-index: 0; flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; outline: none; }
     .bar i { display: block; width: 100%; min-height: 3px; border-radius: 4px 4px 1px 1px; background: var(--accent-line); transition: background .15s; }
     .bar.has i { background: var(--accent); }
     .bar:hover i { background: #9ae9db; }
+    .bar::after { content: attr(data-tooltip); position: absolute; z-index: 2; left: 50%; bottom: calc(100% + 8px); padding: 6px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text); font-size: 11px; font-weight: 600; line-height: 1.4; white-space: nowrap; box-shadow: 0 5px 16px #0003; opacity: 0; pointer-events: none; transform: translate(-50%, 4px); transition: opacity .15s, transform .15s; }
+    .bar:hover, .bar:focus-visible { z-index: 3; }
+    .bar:hover::after, .bar:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
     .bar-axis { display: flex; justify-content: space-between; margin-top: 8px; color: var(--muted); font-size: 10px; direction: ltr; }
 
     /* ---------- نسب الصفوف ---------- */
@@ -322,8 +325,8 @@
           <div class="stat" id="stat-new-card"><span>رسائل جديدة بانتظار المعالجة</span><strong id="stat-support-new">—</strong></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h2>التسجيلات الجديدة آخر 14 يومًا</h2><span id="chart-total"></span></div>
-          <div class="bars" id="chart-bars" role="img" aria-label="رسم بياني للتسجيلات الجديدة"></div>
+          <div class="chart-head"><h2>الطلاب الجدد آخر 14 يومًا</h2><span id="chart-total"></span></div>
+          <div class="bars" id="chart-bars" role="group" aria-label="عدد الطلاب الجدد حسب اليوم"></div>
           <div class="bar-axis"><span id="chart-start"></span><span id="chart-end"></span></div>
         </div>
       </div>
@@ -634,6 +637,7 @@
       const startSec = Math.floor(todayStart.getTime() / 1000) - 13 * DAY;
       const counts = new Array(14).fill(0);
       for (const user of users) {
+        if (!user.is_student) continue;
         const index = Math.floor((user.created_at - startSec) / DAY);
         if (index >= 0 && index < 14) counts[index] += 1;
       }
@@ -645,12 +649,16 @@
         const fill = el("i");
         fill.style.height = `${Math.max(3, (count / max) * 100)}%`;
         const day = new Date((startSec + index * DAY) * 1000);
-        bar.title = `${day.toLocaleDateString("ar")}: ${count.toLocaleString("ar")}`;
+        const dateLabel = day.toLocaleDateString("ar");
+        const countLabel = count.toLocaleString("ar");
+        bar.dataset.tooltip = `${dateLabel} · ${countLabel} ${count === 1 ? "طالب" : "طلاب"}`;
+        bar.setAttribute("aria-label", `${dateLabel}: ${countLabel} ${count === 1 ? "طالب" : "طلاب"}`);
+        bar.tabIndex = 0;
         bar.append(fill);
         bars.append(bar);
       });
       const total = counts.reduce((a, b) => a + b, 0);
-      $("chart-total").textContent = `${fmt(total)} حساب جديد`;
+      $("chart-total").textContent = `${fmt(total)} طالب جديد`;
       $("chart-start").textContent = new Date(startSec * 1000).toLocaleDateString("ar", { day: "numeric", month: "short" });
       $("chart-end").textContent = "اليوم";
     }

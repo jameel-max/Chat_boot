@@ -2564,9 +2564,14 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 {"error": "يجب ألا تتجاوز الرسالة 3000 حرف."}, 400
             )
             return
-        if not user:
+        if user:
+            user = decorate_user(user)
+        else:
             name = payload.get("name")
             email = payload.get("email")
+            if not name and not email:
+                self.send_unauthorized()
+                return
             if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
                 self.send_json({"error": "اكتب اسمًا صالحًا للتواصل."}, 400)
                 return
@@ -2826,9 +2831,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 self.send_json({"error": "الحساب غير موجود."}, 404)
                 return
             saved_profile = USER_PROFILES.get(user["id"]) or {}
-            grade_key = saved_profile.get("grade")
+            grade_key = STORED_TO_GRADE_KEY.get(profile["grade"])
             if grade_key not in GRADE_CHOICES:
-                grade_key = STORED_TO_GRADE_KEY.get(profile["grade"])
+                grade_key = saved_profile.get("grade")
             self.send_json(
                 {
                     "profile": {
