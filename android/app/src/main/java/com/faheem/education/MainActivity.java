@@ -41,6 +41,7 @@ public final class MainActivity extends ComponentActivity {
     private static final int FILE_PICKER_REQUEST = 4102;
 
     private WebView webView;
+    private AccountSettingsView accountSettingsView;
     private LinearLayout loadingPanel;
     private LinearLayout errorPanel;
     private ProgressBar loadingProgress;
@@ -142,6 +143,10 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void handleApplicationBack() {
+        if (accountSettingsView != null) {
+            closeAccountSettings();
+            return;
+        }
         if (webView == null || webView.getVisibility() != View.VISIBLE) {
             goBackOrFinish();
             return;
@@ -183,6 +188,51 @@ public final class MainActivity extends ComponentActivity {
             if ("light".equals(theme) || "dark".equals(theme)) {
                 applySystemTheme(theme);
             }
+        }
+
+        @JavascriptInterface
+        public void openAccountSettings() {
+            runOnUiThread(MainActivity.this::showAccountSettings);
+        }
+    }
+
+    private void showAccountSettings() {
+        if (accountSettingsView != null || webView == null) {
+            return;
+        }
+        FrameLayout root = findViewById(R.id.app_root);
+        accountSettingsView = new AccountSettingsView(
+                this,
+                serverUri,
+                CookieManager.getInstance(),
+                this::applySystemTheme,
+                this::logoutFromAccountSettings,
+                this::closeAccountSettings
+        );
+        root.addView(accountSettingsView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+        accountSettingsView.loadAccount();
+    }
+
+    private void closeAccountSettings() {
+        if (accountSettingsView == null) {
+            return;
+        }
+        FrameLayout root = findViewById(R.id.app_root);
+        root.removeView(accountSettingsView);
+        accountSettingsView.release();
+        accountSettingsView = null;
+    }
+
+    private void logoutFromAccountSettings() {
+        closeAccountSettings();
+        CookieManager.getInstance().removeAllCookies(ignored ->
+                CookieManager.getInstance().flush()
+        );
+        if (webView != null) {
+            webView.loadUrl(serverUri + "/login.html");
         }
     }
 
@@ -354,6 +404,7 @@ public final class MainActivity extends ComponentActivity {
 
     @Override
     protected void onDestroy() {
+        closeAccountSettings();
         if (fileChooserCallback != null) {
             fileChooserCallback.onReceiveValue(null);
             fileChooserCallback = null;
@@ -408,6 +459,13 @@ public final class MainActivity extends ComponentActivity {
                                 + "sync();new MutationObserver(sync).observe("
                                 + "document.documentElement,{attributes:true,"
                                 + "attributeFilter:['data-theme']});"
+                                + "document.addEventListener('click',function(event){"
+                                + "const button=event.target.closest("
+                                + "'#profile-settings-toggle');"
+                                + "if(!button)return;"
+                                + "event.preventDefault();event.stopImmediatePropagation();"
+                                + "window.FaheemAndroid.openAccountSettings();"
+                                + "},true);"
                                 + "})()",
                         null
                 );

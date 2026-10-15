@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.Faheem" parent="@style/Theme.Faheem.Base">
+    <style name="Theme.Faheem" parent="@style/Theme.FaheemBase">
         <item name="android:windowSplashScreenBackground">@color/faheem_splash_background</item>
         <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@color/faheem_splash_background</item>
