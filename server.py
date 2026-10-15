@@ -1317,6 +1317,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
 
         self._chat_perf_started = time.perf_counter()
         self._chat_perf = {}
+        self._quota_charged = None
+        self._quota_kept = False
         try:
             self._do_POST()
         finally:
@@ -1330,12 +1332,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
             stages = (
                 "student_preferences",
                 "title_generation",
-                "prepare_user_message",
                 "conversation_context",
                 "conversation_images",
+                "pre_gemini",
                 "gemini_first_byte",
                 "gemini_total",
-                "save_assistant",
+                "save_exchange",
             )
             details = " ".join(
                 f"{stage}={self._chat_perf[stage]:.3f}s"
@@ -1432,6 +1434,15 @@ class ChatHandler(SimpleHTTPRequestHandler):
         ):
             self.send_json({"error": "مرجع المحادثة غير صالح."}, 400)
             return
+        idempotency_key = payload.get("requestId")
+        if idempotency_key is not None and (
+            not isinstance(idempotency_key, str)
+            or not re.fullmatch(r"[a-f0-9]{32}", idempotency_key)
+        ):
+            self.send_json({"error": "مرجع الطلب غير صالح."}, 400)
+            return
+        idempotency_key = idempotency_key or secrets.token_hex(16)
+        retry_request = payload.get("retryRequest") is True
 
         current_parts = []
         if message.strip():
@@ -1507,6 +1518,58 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if not current_parts:
             self.send_json({"error": "اكتب رسالة أو أرفق صورة أو ملفًا قبل الإرسال."}, 400)
             return
+
+        saved_message = message.strip()
+        title_message = saved_message
+        if file_name:
+            saved_message = "\n".join(
+                part for part in (saved_message, f"مرفق ملف: {file_name}") if part
+            )
+            title_message = title_message or f"ملف {file_name}"
+
+        if retry_request:
+            try:
+                completed_exchange = get_database().get_completed_chat_exchange(
+                    user["id"], idempotency_key
+                )
+            except Database.error_types:
+                self.send_json(
+                    {"error": "تعذّر التحقق من حالة الطلب. حاول مرة أخرى."}, 500
+                )
+                return
+            if completed_exchange:
+                if (
+                    completed_exchange["user_content"] != saved_message
+                    or completed_exchange["image_mime"]
+                    != (mime_type if image is not None else None)
+                    or completed_exchange["image_data"]
+                    != (image_bytes if image is not None else None)
+                ):
+                    self.send_json(
+                        {"error": "مرجع الطلب مستخدم لرسالة مختلفة."}, 409
+                    )
+                    return
+                self.start_sse_response()
+                self.send_sse(
+                    "conversation",
+                    {
+                        "conversationId": completed_exchange["conversation_id"],
+                        "title": completed_exchange["title"],
+                    },
+                )
+                self.send_sse(
+                    "delta", {"text": completed_exchange["assistant_content"]}
+                )
+                self.send_sse(
+                    "done",
+                    {
+                        "responseId": "replayed",
+                        "conversationId": completed_exchange["conversation_id"],
+                        "title": completed_exchange["title"],
+                    },
+                )
+                return
+
         if (image is not None or attachment is not None) and not self.is_admin(user):
             allowed, quota_status = UPLOAD_QUOTA.consume(user["id"])
             if allowed:
@@ -1537,14 +1600,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
         ):
             student_grade = extract_student_grade(message, allow_short_answer=True)
         if student_grade:
-            student_preferences = get_database().update_student_grade(
-                user["id"], student_grade
-            )
-            if not student_preferences:
-                self.send_json(
-                    {"error": "تعذّر تحميل إعدادات حساب الطالب."}, 500
-                )
-                return
+            student_preferences = {
+                **student_preferences,
+                "grade": student_grade,
+                "grade_question_asked": True,
+            }
         self._record_chat_perf("student_preferences", student_started)
         ask_grade = (
             not student_preferences["grade_question_asked"]
@@ -1552,34 +1612,29 @@ class ChatHandler(SimpleHTTPRequestHandler):
         )
 
         try:
-            saved_message = message.strip()
-            title_message = saved_message
-            if file_name:
-                saved_message = "\n".join(
-                    part for part in (saved_message, f"مرفق ملف: {file_name}") if part
-                )
-                title_message = title_message or f"ملف {file_name}"
             title_started = time.perf_counter()
             local_title = make_conversation_title(
                 title_message, image is not None
             )
             self._record_chat_perf("title_generation", title_started)
-            prepare_started = time.perf_counter()
-            stored = get_database().prepare_user_message(
-                user["id"],
-                conversation_id,
-                local_title,
-                saved_message,
-                mime_type if image is not None else None,
-                image_bytes if image is not None else None,
-            )
-            self._record_chat_perf("prepare_user_message", prepare_started)
-        except Database.error_types:
-            self.send_json({"error": "تعذّر حفظ الرسالة في قاعدة البيانات."}, 500)
+        except (TypeError, ValueError):
+            self.send_json({"error": "تعذّر تجهيز الرسالة."}, 400)
             return
-        if not stored:
-            self.send_json({"error": "المحادثة غير موجودة."}, 404)
-            return
+
+        stored = {
+            "id": conversation_id or secrets.token_hex(16),
+            "title": local_title,
+            "pending_title": local_title,
+            "message_id": 1,
+            "user_id": user["id"],
+            "user_content": saved_message,
+            "image_mime": mime_type if image is not None else None,
+            "image_data": image_bytes if image is not None else None,
+            "idempotency_key": idempotency_key,
+            "create_conversation": conversation_id is None,
+            "grade": student_grade,
+            "mark_grade_question_asked": ask_grade or bool(student_grade),
+        }
 
         model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
         if not model or any(
@@ -1603,10 +1658,6 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        stored["user_id"] = user["id"]
-        stored["mark_grade_question_asked"] = ask_grade
-        if stored["title_needs_ai"]:
-            stored["title_source"] = title_message
         if (
             not generate_image
             and image is None
@@ -1622,30 +1673,27 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     "ما عندي صفك محفوظ لسه. احكيلي بأي صف إنت، وبحفظه في ملفك."
                 )
             local_response_id = f"local-{secrets.token_hex(16)}"
-            try:
-                get_database().complete_assistant_message(
-                    stored["id"],
-                    local_answer,
-                    local_response_id,
-                    user_id=user["id"],
-                    grade_question_asked=not student_preferences["grade"],
-                )
-            except Database.error_types:
-                self.send_json({"error": "تعذّر حفظ الرد في سجل المحادثة."}, 500)
-                return
-
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache, no-transform")
-            self.send_header("Connection", "close")
-            self.send_header("X-Accel-Buffering", "no")
-            self.end_headers()
-            self.close_connection = True
+            self.start_sse_response()
             self.send_sse(
-                "conversation",
-                {"conversationId": stored["id"], "title": stored["title"]},
+                "conversation", {"conversationId": stored["id"], "title": stored["title"]}
             )
             self.send_sse("delta", {"text": local_answer})
+            self._quota_kept = True
+            try:
+                self.persist_chat_exchange(
+                    stored,
+                    local_answer,
+                    local_response_id,
+                )
+            except Database.error_types + (RuntimeError,):
+                self.send_sse(
+                    "error",
+                    {
+                        "error": "وصل الرد لكن تعذّر حفظه في سجل المحادثة.",
+                        "code": "save_failed",
+                    },
+                )
+                return
             self.send_sse(
                 "done",
                 {
@@ -1682,20 +1730,22 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
 
         try:
-            context_started = time.perf_counter()
-            context_rows = get_database().get_conversation_context(
-                user["id"], stored["id"]
-            )
-            self._record_chat_perf("conversation_context", context_started)
-            if not context_rows:
-                self.send_json({"error": "المحادثة غير موجودة."}, 404)
-                return
-            context_messages = [dict(row) for row in context_rows]
-            previous_messages = [
-                row
-                for row in context_messages
-                if row["id"] < stored["message_id"]
-            ]
+            if conversation_id:
+                context_started = time.perf_counter()
+                context_rows = get_database().get_conversation_context(
+                    user["id"], conversation_id
+                )
+                self._record_chat_perf("conversation_context", context_started)
+                if not context_rows:
+                    self.send_json({"error": "المحادثة غير موجودة."}, 404)
+                    return
+                context_messages = [dict(row) for row in context_rows]
+                stored["message_id"] = max(row["id"] for row in context_messages) + 1
+                stored["title"] = context_messages[-1]["conversation_title"]
+                stored["pending_title"] = local_title
+            else:
+                context_messages = []
+            previous_messages = context_messages
             system_instruction = conversation_system_instruction(
                 first_reply=not any(
                     row["role"] == "assistant" for row in previous_messages
@@ -1725,10 +1775,14 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     413,
                 )
                 return
-            selected_images = get_database().get_conversation_images(
-                user["id"],
-                stored["id"],
-                [image["id"] for image in selected_prior_images],
+            selected_images = (
+                get_database().get_conversation_images(
+                    user["id"],
+                    stored["id"],
+                    [image["id"] for image in selected_prior_images],
+                )
+                if selected_prior_images
+                else {}
             )
             for context_message in context_messages:
                 selected_image = selected_images.get(context_message["id"])
@@ -1781,6 +1835,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
         }
+        self._record_chat_perf("pre_gemini", self._chat_perf_started)
         gemini_started = time.perf_counter()
         stored["gemini_started_at"] = gemini_started
         stream_started = False
@@ -1790,19 +1845,13 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 request_data, request_headers, request_payload
             ) as response:
                 failure_phase = "gemini_stream"
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache, no-transform")
-                self.send_header("Connection", "close")
-                self.send_header("X-Accel-Buffering", "no")
-                self.end_headers()
-                self.close_connection = True
+                self.start_sse_response()
                 stream_started = True
                 self.send_sse(
                     "conversation",
                     {
-                    "conversationId": stored["id"],
-                    "title": stored["title"],
+                        "conversationId": stored["id"],
+                        "title": stored["title"],
                     },
                 )
                 completed = self.stream_gemini_response(response, stored)
@@ -1829,12 +1878,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             if error.code == 429:
                 detail = (
                     "الخادم مشغول حاليًا بسبب كثرة الطلبات. "
-                    "انتظر قليلًا ثم اضغط «إعادة الإرسال»؛ رسالتك محفوظة."
+                    "انتظر قليلًا ثم اضغط «إعادة الإرسال»."
                 )
             elif error.code in {408, 425} or error.code >= 500:
                 detail = (
-                    "واجه المساعد مشكلة مؤقتة. انتظر قليلًا ثم أعد الإرسال؛ "
-                    "رسالتك محفوظة."
+                    "واجه المساعد مشكلة مؤقتة. انتظر قليلًا ثم أعد الإرسال."
                 )
             else:
                 detail = (
@@ -1855,8 +1903,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json(
                 {
                     "error": (
-                        "تأخر رد المساعد. انتظر قليلًا ثم اضغط «إعادة الإرسال»؛ "
-                        "رسالتك محفوظة."
+                        "تأخر رد المساعد. انتظر قليلًا ثم اضغط «إعادة الإرسال»."
                     )
                 },
                 504,
@@ -2736,23 +2783,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
         self.wfile.write(f"event: {event}\ndata: {body}\n\n".encode("utf-8"))
         self.wfile.flush()
 
-    def send_image_creation_unavailable(self, conversation):
-        answer = (
-            "ما بقدر أنشئ صور، لأني مساعد نصّي. "
-            "بقدر أساعدك بكتابة وصف للصورة أو تحليل صورة تبعثها."
-        )
-        try:
-            get_database().complete_assistant_message(
-                conversation["id"],
-                answer,
-                conversation["response_id"],
-                user_id=conversation["user_id"],
-                grade_question_asked=conversation["mark_grade_question_asked"],
-            )
-        except Database.error_types:
-            self.send_json({"error": "تعذّر حفظ الرد في سجل المحادثة."}, 500)
-            return
-
+    def start_sse_response(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache, no-transform")
@@ -2760,6 +2791,75 @@ class ChatHandler(SimpleHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         self.close_connection = True
+
+    def persist_chat_exchange(
+        self,
+        conversation,
+        answer,
+        response_id,
+    ):
+        save_started = time.perf_counter()
+        try:
+            for attempt in range(2):
+                try:
+                    result = get_database().complete_chat_exchange(
+                        conversation["user_id"],
+                        conversation["id"],
+                        conversation.get("pending_title", conversation["title"]),
+                        conversation["user_content"],
+                        conversation["image_mime"],
+                        conversation["image_data"],
+                        answer,
+                        response_id,
+                        conversation["idempotency_key"],
+                        grade=conversation["grade"],
+                        grade_question_asked=conversation[
+                            "mark_grade_question_asked"
+                        ],
+                        create_conversation=conversation[
+                            "create_conversation"
+                        ],
+                    )
+                    if not result:
+                        raise RuntimeError("Conversation disappeared before save.")
+                    if (
+                        result.get("duplicate")
+                        and result["assistant_content"] != answer
+                    ):
+                        raise RuntimeError(
+                            "An idempotent exchange already contains another answer."
+                        )
+                    conversation["title"] = result["title"]
+                    return result
+                except Database.error_types as error:
+                    if attempt == 0:
+                        time.sleep(0.05)
+                        continue
+                    print(
+                        "[CHAT_SAVE] attempts=2 "
+                        f"error={type(error).__name__}",
+                        flush=True,
+                    )
+                    raise
+        except Database.error_types:
+            raise
+        except Exception as error:
+            print(
+                "[CHAT_SAVE] attempts=1 "
+                f"error={type(error).__name__}",
+                flush=True,
+            )
+            raise RuntimeError("Could not persist completed chat exchange.") from error
+        finally:
+            self._record_chat_perf("save_exchange", save_started)
+
+    def send_image_creation_unavailable(self, conversation):
+        answer = (
+            "ما بقدر أنشئ صور، لأني مساعد نصّي. "
+            "بقدر أساعدك بكتابة وصف للصورة أو تحليل صورة تبعثها."
+        )
+        response_id = f"local-{secrets.token_hex(16)}"
+        self.start_sse_response()
         self.send_sse(
             "conversation",
             {
@@ -2768,10 +2868,26 @@ class ChatHandler(SimpleHTTPRequestHandler):
             },
         )
         self.send_sse("delta", {"text": answer})
+        self._quota_kept = True
+        try:
+            self.persist_chat_exchange(
+                conversation,
+                answer,
+                response_id,
+            )
+        except Database.error_types + (RuntimeError,):
+            self.send_sse(
+                "error",
+                {
+                    "error": "وصل الرد لكن تعذّر حفظه في سجل المحادثة.",
+                    "code": "save_failed",
+                },
+            )
+            return
         self.send_sse(
             "done",
             {
-                "responseId": conversation["response_id"] or "",
+                "responseId": response_id,
                 "conversationId": conversation["id"],
                 "title": conversation["title"],
             },
@@ -2958,30 +3074,24 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     )
                 else:
                     try:
-                        conversation_title = conversation["title"]
-                        save_started = time.perf_counter()
-                        get_database().complete_assistant_message(
-                            conversation["id"],
+                        self.persist_chat_exchange(
+                            conversation,
                             "".join(answer_parts),
                             response_id,
-                            user_id=conversation["user_id"],
-                            grade_question_asked=conversation[
-                                "mark_grade_question_asked"
-                            ],
                         )
-                        self._record_chat_perf("save_assistant", save_started)
-                    except Database.error_types:
-                        if "save_started" in locals():
-                            self._record_chat_perf("save_assistant", save_started)
+                    except Database.error_types + (RuntimeError,):
                         self.send_sse(
                             "error",
-                            {"error": "وصل الرد لكن تعذّر حفظه في سجل المحادثة."},
+                            {
+                                "error": "وصل الرد لكن تعذّر حفظه في سجل المحادثة.",
+                                "code": "save_failed",
+                            },
                         )
                     else:
                         done_payload = {
                             "responseId": response_id,
                             "conversationId": conversation["id"],
-                            "title": conversation_title,
+                            "title": conversation["title"],
                         }
                         self.send_sse("done", done_payload)
                 completed = True
@@ -2991,7 +3101,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     {
                         "error": (
                             "تعذّر إكمال الإجابة الآن. انتظر قليلًا ثم "
-                            "اضغط «إعادة الإرسال»؛ رسالتك محفوظة."
+                            "اضغط «إعادة الإرسال»."
                         )
                     },
                 )
@@ -3006,7 +3116,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     {
                         "error": (
                             "تأخر رد المساعد. انتظر قليلًا ثم اضغط "
-                            "«إعادة الإرسال»؛ رسالتك محفوظة."
+                            "«إعادة الإرسال»."
                         )
                     },
                 )

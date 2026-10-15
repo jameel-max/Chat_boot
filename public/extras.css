@@ -391,3 +391,4 @@ html[data-theme="light"] .convo-loader:not([data-photo-bg] *) {
 .resend-button:hover:not(:disabled), .resend-button:focus-visible { opacity: 1; background: rgba(127, 127, 127, .16); }
 .resend-button:disabled { opacity: .35; cursor: not-allowed; }
 .message-stopped { margin-top: 6px; font-size: 12px; opacity: .65; }
+.message-unsaved { margin-top: 8px; font-size: 12px; color: var(--warning-color, #a65b00); }

@@ -457,7 +457,22 @@ function addResendAction(body, payload, messageElement) {
   button.append(icon, label);
   button.addEventListener("click", () => {
     if (isSending) return;
+    if (payload._completed) {
+      payload.requestId = null;
+      payload.retryRequest = false;
+      payload._completed = false;
+    } else {
+      payload.retryRequest = true;
+    }
     // إن لم يصل رد لهذه الرسالة (فشل أو إيقاف) نستبدلها بدل تكرارها
+    const previousAssistant = messageElement?.nextElementSibling;
+    if (
+      payload.retryRequest &&
+      previousAssistant?.classList.contains("assistant") &&
+      previousAssistant.querySelector(".message-unsaved")
+    ) {
+      previousAssistant.remove();
+    }
     const unanswered = messageElement && conversation.lastElementChild === messageElement;
     if (unanswered) messageElement.remove();
     deliverMessage(payload).catch((error) => {
@@ -1075,11 +1090,13 @@ async function readGeminiStream(response, assistantBody, name, answer, state = {
       conversationTitle = eventData.title || conversationTitle;
       streamComplete = true;
     } else if (eventName === "error") {
-      throw new Error(
+      const error = new Error(
         typeof eventData.error === "string"
           ? eventData.error
           : "تعذّر إكمال الإجابة.",
       );
+      error.code = eventData.code;
+      throw error;
     }
     eventName = "";
   }
@@ -1658,6 +1675,7 @@ async function loadConversation(id) {
       addResendAction(
         body,
         {
+          conversationId: result.conversation.id,
           text: message.content || "",
           image: message.image
             ? { mimeType: message.image.mimeType, data: message.image.data }
@@ -2072,6 +2090,17 @@ async function deliverMessage(payload) {
 
   if (isSending) return;
   if ((image || file) && !ensureUploadAllowed()) return;
+  if (!payload.requestId) {
+    const requestId = new Uint8Array(16);
+    crypto.getRandomValues(requestId);
+    payload.requestId = Array.from(requestId, (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+  }
+  if (!Object.prototype.hasOwnProperty.call(payload, "conversationId")) {
+    payload.conversationId = currentConversationId;
+  }
+  const previousConversationId = currentConversationId;
 
   const visibleText = displayedFileName
     ? `${text}${text ? "\n" : ""}مرفق ملف: ${displayedFileName}`
@@ -2116,7 +2145,9 @@ async function deliverMessage(payload) {
         message: text,
         image,
         file,
-        conversationId: currentConversationId,
+        conversationId: payload.conversationId,
+        requestId: payload.requestId,
+        retryRequest: payload.retryRequest === true,
       }),
     });
 
@@ -2176,6 +2207,9 @@ async function deliverMessage(payload) {
     );
 
     currentConversationId = result.conversationId;
+    payload.conversationId = result.conversationId;
+    payload._completed = true;
+    payload.retryRequest = false;
     refreshHistory = true;
 
     const nearBottom =
@@ -2184,7 +2218,9 @@ async function deliverMessage(payload) {
     if (nearBottom) scrollToLatest();
 
   } catch (error) {
+    currentConversationId = previousConversationId;
     if (request.stopped) {
+      refreshHistory = true;
       // أوقف الطالب الرد: نُبقي ما وصل منه، أو نحذف الفقاعة الفارغة
       if (streamState.answerText && assistantBody.contains(answer)) {
         const note = document.createElement("div");
@@ -2196,14 +2232,22 @@ async function deliverMessage(payload) {
         (assistantBody.messageElement || assistantBody).remove();
       }
     } else {
-      (assistantBody.messageElement || assistantBody).remove();
-
       showToast(
         studentErrorMessage(error),
       );
+      if (error?.code === "save_failed" && streamState.answerText) {
+        const note = document.createElement("div");
+        note.className = "message-unsaved";
+        note.textContent =
+          "وصلت الإجابة لكن لم تُحفظ في سجل المحادثة. انسخها قبل مغادرة الصفحة.";
+        assistantBody.append(note);
+        addReplyActions(assistantBody, streamState.answerText);
+        payload._completed = false;
+      } else {
+        (assistantBody.messageElement || assistantBody).remove();
+        payload._completed = false;
+      }
     }
-
-    refreshHistory = true;
 
   } finally {
     if (activeRequest === request) activeRequest = null;

@@ -169,6 +169,7 @@ class Database:
                     content TEXT NOT NULL,
                     image_mime TEXT,
                     image_data BLOB,
+                    idempotency_key TEXT,
                     created_at INTEGER NOT NULL
                 );
 
@@ -216,6 +217,21 @@ class Database:
                     connection.execute(statement)
 
             if self.is_postgres:
+
+                connection.execute(
+                    """
+                    ALTER TABLE messages
+                    ADD COLUMN IF NOT EXISTS idempotency_key TEXT
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS
+                        messages_idempotency_key_idx
+                    ON messages(idempotency_key)
+                    WHERE idempotency_key IS NOT NULL
+                    """
+                )
 
                 connection.execute(
                     """
@@ -305,6 +321,30 @@ class Database:
                         INTEGER NOT NULL DEFAULT 0
                         """
                     )
+
+                message_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(messages)"
+                    ).fetchall()
+                }
+
+                if "idempotency_key" not in message_columns:
+                    connection.execute(
+                        """
+                        ALTER TABLE messages
+                        ADD COLUMN idempotency_key TEXT
+                        """
+                    )
+
+                connection.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS
+                        messages_idempotency_key_idx
+                    ON messages(idempotency_key)
+                    WHERE idempotency_key IS NOT NULL
+                    """
+                )
 
                 statistics_columns = {
                     row["name"]
@@ -1661,6 +1701,206 @@ class Database:
             ),
         }
 
+    @staticmethod
+    def _find_completed_chat_exchange(connection, user_id, idempotency_key):
+        return connection.execute(
+            """
+            SELECT
+                conversations.id AS conversation_id,
+                conversations.title,
+                user_message.content AS user_content,
+                user_message.image_mime,
+                user_message.image_data,
+                assistant_message.content AS assistant_content
+            FROM messages AS user_message
+            JOIN conversations
+                ON conversations.id = user_message.conversation_id
+            JOIN messages AS assistant_message
+                ON assistant_message.conversation_id = user_message.conversation_id
+               AND assistant_message.id > user_message.id
+               AND assistant_message.role = 'assistant'
+            WHERE conversations.user_id = ?
+              AND user_message.idempotency_key = ?
+              AND user_message.role = 'user'
+            ORDER BY assistant_message.id
+            LIMIT 1
+            """,
+            (user_id, idempotency_key),
+        ).fetchone()
+
+    def get_completed_chat_exchange(self, user_id, idempotency_key):
+        with self.connect() as connection:
+            exchange = self._find_completed_chat_exchange(
+                connection, user_id, idempotency_key
+            )
+        return dict(exchange) if exchange else None
+
+    def complete_chat_exchange(
+        self,
+        user_id,
+        conversation_id,
+        title,
+        user_content,
+        image_mime,
+        image_data,
+        assistant_content,
+        response_id,
+        idempotency_key,
+        grade=None,
+        grade_question_asked=False,
+        create_conversation=False,
+    ):
+        now = int(time.time())
+        try:
+            with self.connect() as connection:
+                existing = self._find_completed_chat_exchange(
+                    connection, user_id, idempotency_key
+                )
+                if existing:
+                    if (
+                        existing["user_content"] != user_content
+                        or existing["image_mime"] != image_mime
+                        or existing["image_data"] != image_data
+                    ):
+                        raise ValueError(
+                            "An idempotency key cannot be reused for another request."
+                        )
+                    return {
+                        **dict(existing),
+                        "duplicate": True,
+                    }
+
+                conversation = connection.execute(
+                    """
+                    SELECT title
+                    FROM conversations
+                    WHERE id = ?
+                      AND user_id = ?
+                    """,
+                    (conversation_id, user_id),
+                ).fetchone()
+                is_new_conversation = conversation is None
+                if is_new_conversation and not create_conversation:
+                    return None
+
+                if is_new_conversation:
+                    saved_title = self.unique_conversation_title(
+                        connection, user_id, title
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO conversations
+                            (id, user_id, title, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            conversation_id,
+                            user_id,
+                            saved_title,
+                            now,
+                            now,
+                        ),
+                    )
+                else:
+                    saved_title = conversation["title"]
+                    if (
+                        self.is_placeholder_title(saved_title)
+                        and not self.is_placeholder_title(title)
+                    ):
+                        saved_title = self.unique_conversation_title(
+                            connection, user_id, title, conversation_id
+                        )
+                        connection.execute(
+                            """
+                            UPDATE conversations
+                            SET title = ?
+                            WHERE id = ?
+                              AND user_id = ?
+                            """,
+                            (saved_title, conversation_id, user_id),
+                        )
+
+                connection.execute(
+                    """
+                    INSERT INTO messages
+                        (
+                            conversation_id,
+                            role,
+                            content,
+                            image_mime,
+                            image_data,
+                            idempotency_key,
+                            created_at
+                        )
+                    VALUES (?, 'user', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        conversation_id,
+                        user_content,
+                        image_mime,
+                        image_data,
+                        idempotency_key,
+                        now,
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO messages
+                        (conversation_id, role, content, created_at)
+                    VALUES (?, 'assistant', ?, ?)
+                    """,
+                    (conversation_id, assistant_content, now),
+                )
+                connection.execute(
+                    """
+                    UPDATE conversations
+                    SET response_id = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                      AND user_id = ?
+                    """,
+                    (response_id, now, conversation_id, user_id),
+                )
+                if grade is not None or grade_question_asked:
+                    connection.execute(
+                        """
+                        UPDATE users
+                        SET grade = COALESCE(?, grade),
+                            grade_question_asked = CASE
+                                WHEN ? THEN 1
+                                ELSE grade_question_asked
+                            END
+                        WHERE id = ?
+                        """,
+                        (grade, grade_question_asked, user_id),
+                    )
+        except self.integrity_error_types:
+            duplicate = self.get_completed_chat_exchange(
+                user_id, idempotency_key
+            )
+            if duplicate:
+                if (
+                    duplicate["user_content"] != user_content
+                    or duplicate["image_mime"] != image_mime
+                    or duplicate["image_data"] != image_data
+                ):
+                    raise ValueError(
+                        "An idempotency key cannot be reused for another request."
+                    )
+                return {
+                    **duplicate,
+                    "duplicate": True,
+                }
+            raise
+
+        return {
+            "conversation_id": conversation_id,
+            "title": saved_title,
+            "user_content": user_content,
+            "assistant_content": assistant_content,
+            "duplicate": False,
+        }
+
     # ============================================================
     # SESSIONS
     # ============================================================
@@ -2210,6 +2450,7 @@ class Database:
                     messages.role,
                     messages.content,
                     messages.image_mime,
+                    conversations.title AS conversation_title,
 
                     messages.image_data IS NOT NULL
                         AS has_image,

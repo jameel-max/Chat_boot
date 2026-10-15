@@ -131,7 +131,10 @@ class ChatApiTests(unittest.TestCase):
                 "answer": answer,
                 "responseId": done.get("responseId"),
                 "conversationId": meta.get("conversationId"),
-                "title": title.get("title", meta.get("title")),
+                "title": title.get(
+                    "title",
+                    done.get("title", meta.get("title")),
+                ),
                 "events": events,
             }
         return status, result, response_headers
@@ -584,6 +587,151 @@ class ChatApiTests(unittest.TestCase):
         images = [part for part in sent["input"] if part["type"] == "image"]
         self.assertEqual(len(images), 1)
         self.assertEqual(images[0]["mime_type"], "image/png")
+
+    def test_starts_gemini_before_writing_new_conversation(self):
+        self.mock_urlopen.return_value = BytesIO(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"إجابة"}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_fast"}}\n\n'
+            ).encode()
+        )
+
+        def check_empty_database(request):
+            self.assertEqual(
+                server.database.list_conversations(self.user["id"]),
+                [],
+            )
+            return self.mock_urlopen.return_value
+
+        self.mock_urlopen.side_effect = check_empty_database
+        status, response = self.post({"message": "سؤال جديد"})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["answer"], "إجابة")
+        conversation = server.database.get_conversation(
+            self.user["id"], response["conversationId"]
+        )
+        self.assertEqual(
+            [message["role"] for message in conversation[1]],
+            ["user", "assistant"],
+        )
+
+    def test_streams_first_chunk_before_delayed_database_save(self):
+        started = server.time.perf_counter()
+        first_delta_at = {}
+        save_started_at = {}
+
+        class TimedStream(BytesIO):
+            def readline(self, *args):
+                line = super().readline(*args)
+                if b'"event_type":"step.delta"' in line:
+                    first_delta_at["time"] = server.time.perf_counter()
+                return line
+
+        self.mock_urlopen.return_value = TimedStream(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"سريع"}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_delayed_save"}}\n\n'
+            ).encode()
+        )
+        original_save = server.Database.complete_chat_exchange
+
+        def delayed_save(database, *args, **kwargs):
+            save_started_at["time"] = server.time.perf_counter()
+            server.time.sleep(0.08)
+            return original_save(database, *args, **kwargs)
+
+        with patch.object(
+            server.Database,
+            "complete_chat_exchange",
+            delayed_save,
+        ):
+            status, response = self.post({"message": "اختبار تأخير التخزين"})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["answer"], "سريع")
+        self.assertLess(first_delta_at["time"], save_started_at["time"])
+        self.assertGreaterEqual(
+            server.time.perf_counter() - save_started_at["time"],
+            0.08,
+        )
+        self.assertLess(first_delta_at["time"] - started, 0.08)
+
+    def test_retry_replays_completed_exchange_without_regenerating(self):
+        request_id = "a" * 32
+        self.mock_urlopen.return_value = BytesIO(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"الإجابة الأصلية"}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_retry"}}\n\n'
+            ).encode()
+        )
+        payload = {
+            "message": "سؤال يعاد بأمان",
+            "requestId": request_id,
+        }
+        status, first = self.post(payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(first["answer"], "الإجابة الأصلية")
+
+        self.mock_urlopen.reset_mock()
+        status, replay = self.post({**payload, "retryRequest": True})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(replay["answer"], "الإجابة الأصلية")
+        self.assertEqual(replay["conversationId"], first["conversationId"])
+        self.mock_urlopen.assert_not_called()
+        status, conflict = self.post(
+            {
+                **payload,
+                "message": "رسالة مختلفة بنفس المعرّف",
+                "retryRequest": True,
+            }
+        )
+        self.assertEqual(status, 409)
+        self.assertIn("مرجع الطلب مستخدم", conflict["error"])
+        self.mock_urlopen.assert_not_called()
+        conversation = server.database.get_conversation(
+            self.user["id"], first["conversationId"]
+        )
+        self.assertEqual(
+            [message["role"] for message in conversation[1]],
+            ["user", "assistant"],
+        )
+
+    def test_save_failure_keeps_streamed_answer_and_does_not_persist_partial_pair(self):
+        self.mock_urlopen.return_value = BytesIO(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"الإجابة التي ظهرت"}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_save_error"}}\n\n'
+            ).encode()
+        )
+        with patch.object(
+            server.Database,
+            "complete_chat_exchange",
+            side_effect=sqlite3.OperationalError("database unavailable"),
+        ):
+            status, response = self.post({"message": "احتفظوا بالإجابة"})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            "".join(
+                event["text"]
+                for name, event in response["events"]
+                if name == "delta"
+            ),
+            "الإجابة التي ظهرت",
+        )
+        error = next(event for name, event in response["events"] if name == "error")
+        self.assertEqual(error["code"], "save_failed")
+        self.assertEqual(server.database.list_conversations(self.user["id"]), [])
 
     def test_table_formatting_followup_reuses_previous_schedule_context(self):
         previous = server.database.prepare_user_message(
@@ -1060,7 +1208,7 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("ما بقدر أنشئ صور", result["answer"])
         self.assertIn("مساعد نصّي", result["answer"])
-        self.assertEqual(result["responseId"], "")
+        self.assertTrue(result["responseId"].startswith("local-"))
         self.mock_urlopen.assert_not_called()
         detail = server.database.get_conversation(
             self.user["id"], result["conversationId"]
