@@ -1429,6 +1429,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if self.path == "/api/account/phone":
             self.change_account_phone()
             return
+        if self.path == "/api/account/grade":
+            self.change_account_grade()
+            return
         if self.path == "/api/support-messages":
             self.submit_support_message()
             return
@@ -2763,6 +2766,46 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "الحساب غير موجود."}, 404)
             return
         self.send_json({"ok": True, "phone": phone})
+
+    def change_account_grade(self):
+        user = self.current_user()
+        if not user:
+            self.send_unauthorized()
+            return
+        if not student_name_from_email(user.get("email", "")):
+            self.send_json(
+                {"error": "تغيير الصف متاح لحسابات الطلاب فقط."}, 403
+            )
+            return
+        payload = self.read_json_body()
+        if payload is None:
+            return
+        grade_key = str(payload.get("grade", ""))
+        if grade_key not in GRADE_CHOICES:
+            self.send_json({"error": "اختر صفًا دراسيًا صالحًا."}, 400)
+            return
+
+        try:
+            result = get_database().update_student_grade(
+                user["id"], GRADE_CHOICES[grade_key]["stored"]
+            )
+        except Database.error_types as error:
+            print(f"[ACCOUNT] تعذّر تحديث صف الطالب: {error}", flush=True)
+            self.send_json({"error": "تعذّر حفظ الصف الدراسي."}, 500)
+            return
+        if not result:
+            self.send_json({"error": "الحساب غير موجود."}, 404)
+            return
+
+        profile = USER_PROFILES.get(user["id"]) or {}
+        try:
+            USER_PROFILES.set(user["id"], profile.get("fullName", ""), grade_key)
+        except OSError as error:
+            print(f"[ACCOUNT] تعذّر تحديث نسخة الصف في ملف الملف الشخصي: {error}", flush=True)
+        GRADE_DIRECTORY.forget(user["id"])
+        self.send_json(
+            {"ok": True, "grade": grade_key, "gradeLabel": GRADE_CHOICES[grade_key]["label"]}
+        )
 
     def account_profile(self, user=None):
         if user is None:

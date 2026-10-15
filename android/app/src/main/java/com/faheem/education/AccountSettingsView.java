@@ -15,10 +15,12 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.WebView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import org.json.JSONException;
@@ -73,6 +75,7 @@ final class AccountSettingsView extends LinearLayout {
     private TextView message;
     private EditText nameInput;
     private EditText phoneInput;
+    private Spinner gradeInput;
     private EditText currentPasswordInput;
     private EditText newPasswordInput;
     private EditText confirmPasswordInput;
@@ -127,6 +130,7 @@ final class AccountSettingsView extends LinearLayout {
                     if (profile != null) {
                         nameInput.setText(profile.optString("fullName", ""));
                         phoneInput.setText(profile.optString("phone", ""));
+                        selectGrade(profile.optString("grade", ""));
                     }
                     loadPreferences();
                 });
@@ -193,6 +197,27 @@ final class AccountSettingsView extends LinearLayout {
         phoneInput.setTextDirection(View.TEXT_DIRECTION_LTR);
         studentCard.addView(phoneInput, fieldParams());
         addActionButton(studentCard, "حفظ رقم الهاتف", view -> savePhone());
+
+        addHeading(studentCard, "الصف الدراسي", "اختر صفك الحالي لتناسب الإجابات منهجك.");
+        gradeInput = new Spinner(getContext());
+        gradeInput.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        String[] gradeLabels = {
+                "اختر صفك",
+                "الصف الثامن",
+                "الصف التاسع",
+                "الصف العاشر",
+                "الأول الثانوي",
+                "الثاني الثانوي"
+        };
+        ArrayAdapter<String> gradeAdapter = new ArrayAdapter<>(
+                getContext(),
+                android.R.layout.simple_spinner_item,
+                gradeLabels
+        );
+        gradeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        gradeInput.setAdapter(gradeAdapter);
+        studentCard.addView(gradeInput, fieldParams());
+        addActionButton(studentCard, "حفظ الصف", view -> saveGrade());
 
         LinearLayout appearanceCard = card(null);
         addHeading(appearanceCard, "المظهر", "اختر المظهر الذي تفضله.");
@@ -406,6 +431,34 @@ final class AccountSettingsView extends LinearLayout {
         });
     }
 
+    private void saveGrade() {
+        int selection = gradeInput.getSelectedItemPosition();
+        if (selection <= 0) {
+            showError("اختر صفك الدراسي.");
+            return;
+        }
+        String grade = String.valueOf(selection + 7);
+        request("/api/account/grade", "POST", json("grade", grade), (response, error) -> {
+            if (error != null) {
+                showError(error.getMessage());
+                return;
+            }
+            updateWebProfileGrade(grade);
+            showSuccess("تم تحديث صفك الدراسي بنجاح.");
+        });
+    }
+
+    private void selectGrade(String grade) {
+        try {
+            int key = Integer.parseInt(grade);
+            if (key >= 8 && key <= 12) {
+                gradeInput.setSelection(key - 7);
+            }
+        } catch (NumberFormatException ignored) {
+            gradeInput.setSelection(0);
+        }
+    }
+
     private void saveTheme(String theme) {
         request("/api/preferences", "POST", json("theme", theme), (response, error) -> {
             if (error != null) {
@@ -482,6 +535,21 @@ final class AccountSettingsView extends LinearLayout {
                             + "if(input)input.value=name;"
                             + "const avatar=document.querySelector('#user-avatar-fallback');"
                             + "if(avatar)avatar.textContent=name.slice(0,1);"
+                            + "})()",
+                    null
+            );
+        });
+    }
+
+    private void updateWebProfileGrade(String grade) {
+        String escaped = JSONObject.quote(grade);
+        ((MainActivity) getContext()).runOnUiThread(() -> {
+            MainActivity activity = (MainActivity) getContext();
+            ((WebView) activity.findViewById(R.id.web_view)).evaluateJavascript(
+                    "(function(){"
+                            + "const grade=" + escaped + ";"
+                            + "const input=document.querySelector('#grade-input');"
+                            + "if(input)input.value=grade;"
                             + "})()",
                     null
             );
@@ -619,6 +687,9 @@ final class AccountSettingsView extends LinearLayout {
         }
         if (nameInput != null) {
             int inputBackground = dark ? Color.rgb(43, 46, 52) : Color.rgb(245, 247, 249);
+            if (gradeInput != null) {
+                gradeInput.setBackground(roundRect(inputBackground, dp(10)));
+            }
             for (EditText input : new EditText[]{
                     nameInput, phoneInput, currentPasswordInput,
                     newPasswordInput, confirmPasswordInput

@@ -14,10 +14,10 @@
     <script>try{var t=localStorage.getItem("faheem_theme"),d=t==="dark"||t==="light"?t:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=d;document.querySelector('meta[name="theme-color"]').content=d==="dark"?"#101114":"#ffffff"}catch(e){document.documentElement.dataset.theme=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}</script>
     <script>try{if(!localStorage.getItem("faheem_logged_in_before"))location.replace("/login.html")}catch(e){}</script>
     <link rel="stylesheet" href="/style.css?v=26">
-    <link rel="stylesheet" href="/extras.css?v=9">
+    <link rel="stylesheet" href="/extras.css?v=10">
     <link rel="stylesheet" href="/theme.css?v=4">
     <script>try{if(localStorage.getItem("faheem_sidebar_collapsed")==="1")document.documentElement.classList.add("sidebar-collapsed")}catch(e){}</script>
-    <script src="/app.js?v=55" defer></script>
+    <script src="/app.js?v=56" defer></script>
   </head>
   <body>
     <div class="app-loader" id="app-loader" role="status" aria-live="polite" aria-label="جارٍ التحميل">
@@ -192,6 +192,23 @@
                 </form>
                 <p class="settings-message" id="phone-message" role="status" aria-live="polite"></p>
               </section>
+              <section class="settings-card" id="grade-settings">
+                <div class="settings-card-heading"><span class="settings-icon" aria-hidden="true">▤</span><div><h2>الصف الدراسي</h2><p>اختر صفك الحالي ليقدّم لك فهيم إجابات تناسب منهجك.</p></div></div>
+                <form class="settings-form" id="grade-form">
+                  <label for="grade-input">الصف الحالي</label>
+                  <select id="grade-input" required>
+                    <option value="">اختر صفك</option>
+                    <option value="8">الصف الثامن</option>
+                    <option value="9">الصف التاسع</option>
+                    <option value="10">الصف العاشر</option>
+                    <option value="11">الأول الثانوي</option>
+                    <option value="12">الثاني الثانوي</option>
+                  </select>
+                  <button class="settings-submit" id="grade-submit" type="submit">حفظ الصف</button>
+                </form>
+                <p class="settings-message" id="grade-message" role="status" aria-live="polite"></p>
+              </section>
+              <p class="settings-message error" id="account-profile-message" role="alert" aria-live="polite"></p>
             </section>
             <section class="settings-page hidden" id="settings-security" data-settings-page="security" aria-labelledby="settings-security-title">
               <div class="settings-page-heading"><h2 id="settings-security-title">الأمان</h2><p>حافظ على أمان حسابك بتحديث كلمة المرور بانتظام.</p></div>

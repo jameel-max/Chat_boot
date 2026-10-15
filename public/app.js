@@ -54,6 +54,13 @@ const phoneForm = document.querySelector("#phone-form");
 const phoneInput = document.querySelector("#phone-input");
 const phoneSubmit = document.querySelector("#phone-submit");
 const phoneMessage = document.querySelector("#phone-message");
+const gradeSettings = document.querySelector("#grade-settings");
+const gradeForm = document.querySelector("#grade-form");
+const gradeInput = document.querySelector("#grade-input");
+const gradeSubmit = document.querySelector("#grade-submit");
+const gradeMessage = document.querySelector("#grade-message");
+const accountProfileMessage = document.querySelector("#account-profile-message");
+let accountProfileLoadPending = false;
 const userAvatar = document.querySelector("#user-avatar");
 const userAvatarFallback = document.querySelector("#user-avatar-fallback");
 const logoutButton = document.querySelector("#logout-button");
@@ -1305,6 +1312,7 @@ function setAuthenticated(user, isAdmin = false, isPrimaryAdmin = false) {
   profileMenuEmail.textContent = user.email || "";
   usernameSettings.classList.toggle("hidden", !user.isStudentAccount);
   phoneSettings.classList.toggle("hidden", !user.isStudentAccount);
+  gradeSettings.classList.toggle("hidden", !user.isStudentAccount);
   usernameInput.value = user.name || "";
   helpCenterButton.classList.remove("hidden");
   profileSettings.classList.remove("hidden");
@@ -2784,6 +2792,31 @@ function selectSettingsPage(pageName) {
     page.classList.toggle("hidden", !selected);
     page.classList.toggle("active", selected);
   });
+  if (pageName === "account" && currentUser?.isStudentAccount) {
+    loadAccountSettings();
+  }
+}
+
+async function loadAccountSettings() {
+  if (accountProfileLoadPending) return;
+  accountProfileLoadPending = true;
+  accountProfileMessage.classList.remove("error");
+  accountProfileMessage.textContent = "";
+  try {
+    const result = await apiRequest("/api/account/profile");
+    usernameInput.value = result.profile.fullName || "";
+    phoneInput.value = result.profile.phone || "";
+    gradeInput.value = result.profile.grade || "";
+    currentUser.name = result.profile.fullName || currentUser.name;
+    profileName.textContent = currentUser.name;
+    profileMenuName.textContent = currentUser.name || "حساب فهيم";
+    userAvatarFallback.textContent = (currentUser.name || currentUser.email).slice(0, 1);
+  } catch (error) {
+    accountProfileMessage.classList.add("error");
+    accountProfileMessage.textContent = `تعذّر تحميل بيانات الحساب: ${error.message}`;
+  } finally {
+    accountProfileLoadPending = false;
+  }
 }
 
 profileSettingsToggle.addEventListener("click", () => {
@@ -2888,6 +2921,29 @@ phoneForm.addEventListener("submit", async (event) => {
     phoneMessage.textContent = error.message;
   } finally {
     phoneSubmit.disabled = false;
+  }
+});
+
+gradeForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!gradeForm.reportValidity()) return;
+  gradeMessage.classList.remove("error");
+  gradeMessage.textContent = "";
+  gradeSubmit.disabled = true;
+  try {
+    const result = await apiRequest("/api/account/grade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ grade: gradeInput.value }),
+    });
+    gradeInput.value = result.grade;
+    currentUser.gradeLabel = result.gradeLabel;
+    gradeMessage.textContent = "تم تحديث صفك الدراسي بنجاح.";
+  } catch (error) {
+    gradeMessage.classList.add("error");
+    gradeMessage.textContent = error.message;
+  } finally {
+    gradeSubmit.disabled = false;
   }
 });
 

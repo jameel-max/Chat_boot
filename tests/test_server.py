@@ -318,7 +318,6 @@ class ChatApiTests(unittest.TestCase):
             server.database.get_student_account_profile(student["id"])["phone"],
             "+962791234567",
         )
-
         status, result, _ = self.request(
             "POST",
             "/api/account/phone",
@@ -335,6 +334,43 @@ class ChatApiTests(unittest.TestCase):
             "POST",
             "/api/account/phone",
             {"phone": "078 123 4567"},
+        )
+        self.assertEqual(status, 403)
+
+    def test_student_can_update_own_grade_and_invalid_changes_are_rejected(self):
+        email = server.student_email(server.name_tokens("محمد أحمد علي الحسن"))
+        student = server.database.register_user(email, "long-enough-password")
+        self.session_token = server.database.create_session(student["id"])
+
+        with patch.object(
+            server.USER_PROFILES, "set", side_effect=OSError("profile file unavailable")
+        ), patch.object(server.GRADE_DIRECTORY, "forget"):
+            status, result, _ = self.request(
+                "POST", "/api/account/grade", {"grade": "11"}
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["grade"], "11")
+        self.assertEqual(result["gradeLabel"], "الأول الثانوي")
+        self.assertEqual(
+            server.database.get_student_preferences(student["id"])["grade"],
+            "الحادي عشر",
+        )
+
+        status, result, _ = self.request(
+            "POST", "/api/account/grade", {"grade": "13"}
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            server.database.get_student_preferences(student["id"])["grade"],
+            "الحادي عشر",
+        )
+
+        regular_user = server.database.register_user(
+            "regular@example.com", "long-enough-password"
+        )
+        self.session_token = server.database.create_session(regular_user["id"])
+        status, result, _ = self.request(
+            "POST", "/api/account/grade", {"grade": "10"}
         )
         self.assertEqual(status, 403)
 
