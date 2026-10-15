@@ -2534,7 +2534,21 @@ async function deliverMessage(payload) {
   }
 }
 
+function isAppRuntime() {
+  return /FaheemAndroid/i.test(window.navigator.userAgent || "");
+}
+
 function setupSpeechRecognition() {
+  if (isAppRuntime()) {
+    if (micButton) {
+      micButton.hidden = true;
+      micButton.disabled = true;
+      micButton.setAttribute("aria-hidden", "true");
+      micButton.remove();
+    }
+    return;
+  }
+
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     micButton.classList.add("unsupported");
