@@ -1088,6 +1088,10 @@ class ChatApiTests(unittest.TestCase):
     def test_assistant_identity_and_developer_questions_are_explicit(self):
         self.assertTrue(server.user_asks_assistant_identity("شو اسمك؟"))
         self.assertTrue(server.user_asks_assistant_identity("مين طورك؟"))
+        self.assertTrue(
+            server.user_asks_assistant_identity("مين جميل اسماعيل ابو حماد؟")
+        )
+        self.assertTrue(server.user_asks_assistant_identity("من هو جميل أبو حماد"))
         self.assertFalse(server.user_asks_assistant_identity("اشرح قانون نيوتن"))
         instruction = server.conversation_system_instruction(
             first_reply=False,
@@ -1096,7 +1100,8 @@ class ChatApiTests(unittest.TestCase):
             asks_identity=True,
         )
         self.assertIn("أنا فهيم، مساعد ذكي للطلاب في مدرسة خريبة السوق", instruction)
-        self.assertIn("صنعني المطور جميل إسماعيل أبو حماد", instruction)
+        self.assertIn("جميل إسماعيل أبو حماد هو المطور الذي صنعني", instruction)
+        self.assertIn("مين جميل إسماعيل أبو حماد", instruction)
 
     def test_detects_greetings_only_at_the_start_of_the_message(self):
         self.assertTrue(server.user_starts_with_greeting("مرحبا، عندي سؤال"))

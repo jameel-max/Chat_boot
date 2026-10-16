@@ -185,11 +185,14 @@ def user_asks_own_grade(message):
 
 
 def user_asks_assistant_identity(message):
-    normalized = re.sub(r"[\u064b-\u065f\u0670ـ]", "", message.casefold())
+    normalized = message.casefold().translate(str.maketrans("أإآ", "ااا"))
+    normalized = re.sub(r"[\u064b-\u065f\u0670ـ]", "", normalized)
     return re.search(
         r"(?:شو|ما|ايش|إيش|وش)\s+(?:هو\s+)?اسمك|"
         r"(?:مين|من)\s+(?:أنت|انت)|"
         r"(?:مين|من)\s+(?:صنعك|طورك|طوّرك)|"
+        r"(?:مين|من)\s+(?:هو\s+)?جميل\s+اسماعيل\s+ابو\s+حماد|"
+        r"(?:مين|من)\s+(?:هو\s+)?جميل\s+ابو\s+حماد|"
         r"عرفني\s+عن\s+نفسك|احكيلي\s+عن\s+نفسك",
         normalized,
     ) is not None
@@ -209,7 +212,9 @@ def conversation_system_instruction(
         instructions.append(
             "في هذه الرسالة، عرّف عن نفسك بوضوح بالنص: "
             "«أنا فهيم، مساعد ذكي للطلاب في مدرسة خريبة السوق». "
-            "إذا سأل الطالب عن مطورك، قل: «صنعني المطور جميل إسماعيل أبو حماد»."
+            "إذا سأل الطالب عن مطورك أو قال «مين جميل إسماعيل أبو حماد؟» "
+            "أو «مين جميل أبو حماد؟»، أجب بوضوح: «جميل إسماعيل أبو حماد هو "
+            "المطور الذي صنعني». لا تنسب إليه مناصب أو سيرة شخصية أخرى دون مصدر موثوق."
         )
         if user_greeted:
             instructions.append("بدأ الطالب بتحية؛ ابدأ بهذا التعريف ثم أجب عن سؤاله.")
