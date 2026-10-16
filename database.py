@@ -484,13 +484,17 @@ class Database:
                 """
                 UPDATE messages
                 SET content = CASE
-                        WHEN content LIKE '%مرفق صورة (غير محفوظة)%'
+                        WHEN content LIKE ?
                             THEN content
-                        ELSE content || '\nمرفق صورة (غير محفوظة)'
+                        ELSE content || ?
                     END,
                     image_data = NULL
                 WHERE image_data IS NOT NULL
-                """
+                """,
+                (
+                    "%مرفق صورة (غير محفوظة)%",
+                    "\nمرفق صورة (غير محفوظة)",
+                ),
             ).rowcount > 0
 
         if legacy_images_removed and not self.is_postgres:
