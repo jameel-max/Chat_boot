@@ -503,7 +503,7 @@ def make_conversation_title(message, has_image):
     return title[:MAX_TITLE_LENGTH].rstrip()
 
 def generate_conversation_title(message, answer):
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip()
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro").strip()
     title_input = (
         "اكتب عنوانًا لهذه المحادثة يصف موضوعها العام بدقة، اعتمادًا على أول رسالة "
         "ورد فهيم. لا تكتب إجابة الطالب ولا تلخص المحادثة كاملة. أعد العنوان فقط "
@@ -1702,7 +1702,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             "mark_grade_question_asked": ask_grade or bool(student_grade),
         }
 
-        model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
+        model = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro").strip()
         if not model or any(
             character
             not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"

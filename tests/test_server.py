@@ -530,6 +530,23 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn('"phase":"model_validation"', diagnostic)
         self.assertIn('"error_type":"ConfigurationError"', diagnostic)
 
+    def test_uses_gemini_3_1_pro_by_default(self):
+        self.mock_urlopen.return_value = BytesIO(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"إجابة"}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_model"}}\n\n'
+            ).encode()
+        )
+        with patch.dict(server.os.environ):
+            server.os.environ.pop("GEMINI_MODEL", None)
+            status, _ = self.post({"message": "سؤال"})
+
+        self.assertEqual(status, 200)
+        sent = json.loads(self.mock_urlopen.call_args.args[0].data)
+        self.assertEqual(sent["model"], "gemini-3.1-pro")
+
     def test_protects_chat_api_without_a_session(self):
         status, result = self.post(
             {"message": "مرحبا"}, authorized=False
@@ -598,7 +615,7 @@ class ChatApiTests(unittest.TestCase):
             "https://generativelanguage.googleapis.com/v1beta/interactions",
         )
         sent = json.loads(request.data)
-        self.assertEqual(sent["model"], "gemini-3.1-flash-lite")
+        self.assertEqual(sent["model"], "gemini-3.1-pro")
         self.assertIn(server.SYSTEM_INSTRUCTION, sent["system_instruction"])
         self.assertIn("لا تبدأ بتحية", sent["system_instruction"])
         self.assertIn("اسأله مرة واحدة فقط", sent["system_instruction"])
