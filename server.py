@@ -84,13 +84,21 @@ ALLOWED_DOCUMENT_EXTENSIONS = {
 database = None
 _database_lock = threading.Lock()
 
+
 SYSTEM_INSTRUCTION = " ".join(
     (
         "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين.",
-        "أجب مباشرة وبإيجاز (فقرة إلى ثلاث)، ولا تُطل إلا إذا طلب الطالب الشرح.",
-        "في الرياضيات والعلوم اكتب الخطوات مرتبة وقصيرة والمعادلات بـ LaTeX.",
-        "لا تعرّف بنفسك إلا إذا سُئلت.",
-        "استخدم تنسيق Markdown بحدّه الأدنى، وقوائم أو جداول فقط عند الحاجة الفعلية.",
+        "افهم مقصد الطالب أولًا، ثم قدّم إجابة دقيقة ومباشرة تناسب سؤاله ومستواه.",
+        "في الرياضيات والعلوم، حلّل المسألة بعناية، وقدّم الحل الصحيح بخطوات واضحة عندما يحتاج الطالب إلى الشرح، مع كتابة المعادلات والرموز بصورة صحيحة.",
+        "تعامل مع الصور والمرفقات وفق محتواها، واستخرج السؤال منها بدقة قبل الإجابة، ووضّح أي جزء غير مقروء بدلًا من تخمينه.",
+        "ابدأ بالإجابة مباشرة، وتجنب المقدمات الطويلة والتكرار وإعادة صياغة السؤال دون حاجة.",
+        "استخدم فقرات قصيرة، واترك سطرًا فارغًا بينها، وأضف عناوين Markdown موجزة عندما تحسن تنظيم الإجابة.",
+        "استخدم القوائم عند الحاجة، والجداول فقط عندما تسهّل المقارنة أو تنظيم المعلومات فعلًا.",
+        "نسّق المعادلات الرياضية باستخدام LaTeX، واستخدم الرموز والوحدات العلمية بدقة.",
+        "اجعل طول الإجابة متناسبًا مع السؤال: مختصرة للطلبات المباشرة، ومفصلة عندما يتطلب الموضوع شرحًا.",
+        "لا تذكر أنك فهيم أو تعرّف بنفسك إلا إذا سُئلت عن هويتك.",
+        "لا تختلق معلومات أو مصادر أو نتائج، وإذا لم تكن متأكدًا فوضّح ذلك باختصار.",
+        "إذا كان الطلب واضحًا، نفّذه مباشرة دون أسئلة غير ضرورية، ولا تطلب توضيحات إلا عندما تكون ضرورية للإجابة الصحيحة.",
     )
 )
 
@@ -176,14 +184,11 @@ def user_asks_own_grade(message):
 
 
 def user_asks_assistant_identity(message):
-    normalized = message.casefold().translate(str.maketrans("أإآ", "ااا"))
-    normalized = re.sub(r"[\u064b-\u065f\u0670ـ]", "", normalized)
+    normalized = re.sub(r"[\u064b-\u065f\u0670ـ]", "", message.casefold())
     return re.search(
         r"(?:شو|ما|ايش|إيش|وش)\s+(?:هو\s+)?اسمك|"
         r"(?:مين|من)\s+(?:أنت|انت)|"
         r"(?:مين|من)\s+(?:صنعك|طورك|طوّرك)|"
-        r"(?:مين|من)\s+(?:هو\s+)?جميل\s+اسماعيل\s+ابو\s+حماد|"
-        r"(?:مين|من)\s+(?:هو\s+)?جميل\s+ابو\s+حماد|"
         r"عرفني\s+عن\s+نفسك|احكيلي\s+عن\s+نفسك",
         normalized,
     ) is not None
@@ -203,9 +208,7 @@ def conversation_system_instruction(
         instructions.append(
             "في هذه الرسالة، عرّف عن نفسك بوضوح بالنص: "
             "«أنا فهيم، مساعد ذكي للطلاب في مدرسة خريبة السوق». "
-            "إذا سأل الطالب عن مطورك أو قال «مين جميل إسماعيل أبو حماد؟» "
-            "أو «مين جميل أبو حماد؟»، أجب بوضوح: «جميل إسماعيل أبو حماد هو "
-            "المطور الذي صنعني». لا تنسب إليه مناصب أو سيرة شخصية أخرى دون مصدر موثوق."
+            "إذا سأل الطالب عن مطورك، قل: «صنعني المطور جميل إسماعيل أبو حماد»."
         )
         if user_greeted:
             instructions.append("بدأ الطالب بتحية؛ ابدأ بهذا التعريف ثم أجب عن سؤاله.")
@@ -500,7 +503,7 @@ def make_conversation_title(message, has_image):
     return title[:MAX_TITLE_LENGTH].rstrip()
 
 def generate_conversation_title(message, answer):
-    model = gemini_model()
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip()
     title_input = (
         "اكتب عنوانًا لهذه المحادثة يصف موضوعها العام بدقة، اعتمادًا على أول رسالة "
         "ورد فهيم. لا تكتب إجابة الطالب ولا تلخص المحادثة كاملة. أعد العنوان فقط "
@@ -578,12 +581,6 @@ STATIC_GZIP_TYPES = {".html", ".js", ".css", ".svg", ".json", ".txt"}
 STATIC_GZIP_CACHE = {}
 STATIC_GZIP_LOCK = threading.Lock()
 GEMINI_THINKING_LEVELS = {"minimal", "low", "medium", "high"}
-
-def gemini_model():
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
-    if model == "gemini-3.1-pro":
-        return "gemini-3.1-pro-preview"
-    return model
 
 
 class UploadQuota:
@@ -1705,7 +1702,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             "mark_grade_question_asked": ask_grade or bool(student_grade),
         }
 
-        model = gemini_model()
+        model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
         if not model or any(
             character
             not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
@@ -3121,10 +3118,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
     def open_gemini_stream(self, request_data, request_headers, request_payload=None):
         parts = urlsplit(API_URL)
         path = parts.path + (f"?{parts.query}" if parts.query else "")
-        thinking_retry_used = False
-        transient_attempts = 0
-        fallback_used = False
-        while True:
+        for attempt in (0, 1):
             connection = self.take_gemini_connection()
             try:
                 connection.request(
@@ -3138,18 +3132,18 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 connection.close()
                 raise URLError(error) from error
             if response.status < 400:
-                if thinking_retry_used:
+                if attempt == 1:
                     ChatHandler.thinking_rejected = True
                 return GeminiStream(connection, response)
             error_body = response.read()
             connection.close()
-
             if (
-                not thinking_retry_used
+                attempt == 0
                 and response.status == 400
                 and request_payload
                 and "generation_config" in request_payload
             ):
+                # النموذج رفض إعداد التفكير: نعيد المحاولة مرة واحدة بدونه.
                 print("[PERF] رفض Gemini thinking_level؛ إعادة المحاولة بدونه", flush=True)
                 request_payload = {
                     key: value
@@ -3159,41 +3153,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 request_data = json.dumps(
                     request_payload, ensure_ascii=False
                 ).encode("utf-8")
-                thinking_retry_used = True
                 continue
-
-            transient = response.status in {408, 425, 429} or 500 <= response.status < 600
-            if transient and transient_attempts < len(TRANSIENT_RETRY_DELAYS):
-                log_chat_diagnostic(
-                    "gemini_retry",
-                    "HTTPError",
-                    response.reason,
-                    upstream_http_status=response.status,
-                )
-                time.sleep(TRANSIENT_RETRY_DELAYS[transient_attempts])
-                transient_attempts += 1
-                continue
-
-            if (
-                transient
-                and not fallback_used
-                and FALLBACK_MODEL
-                and request_payload
-                and request_payload.get("model") != FALLBACK_MODEL
-            ):
-                log_chat_diagnostic(
-                    "gemini_fallback",
-                    "HTTPError",
-                    "Switching to fallback model.",
-                    upstream_http_status=response.status,
-                )
-                fallback_used = True
-                request_payload = {**request_payload, "model": FALLBACK_MODEL}
-                request_data = json.dumps(
-                    request_payload, ensure_ascii=False
-                ).encode("utf-8")
-                continue
-
             raise HTTPError(
                 API_URL,
                 response.status,

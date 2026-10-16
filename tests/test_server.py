@@ -15,78 +15,6 @@ from urllib.request import Request, urlopen
 import server
 
 
-class GeminiStreamRetryTests(unittest.TestCase):
-    class Response:
-        def __init__(self, status, reason):
-            self.status = status
-            self.reason = reason
-            self.msg = {}
-
-        def read(self):
-            return b"upstream error"
-
-        def close(self):
-            pass
-
-    class Connection:
-        def __init__(self, response):
-            self.response = response
-            self.closed = False
-
-        def request(self, method, path, body, headers):
-            self.request_data = body
-
-        def getresponse(self):
-            return self.response
-
-        def close(self):
-            self.closed = True
-
-    def run_open_gemini_stream(self, responses):
-        connections = [self.Connection(response) for response in responses]
-        handler = unittest.mock.Mock()
-        handler.take_gemini_connection.side_effect = connections
-        with patch("server.time.sleep") as sleep, patch("builtins.print"):
-            stream = server.ChatHandler.open_gemini_stream(
-                handler, b"{}", {}, {"model": "gemini-3.1-flash-lite"}
-            )
-        return stream, connections, sleep
-
-    def test_retries_transient_gemini_server_error_once(self):
-        failed = self.Response(503, "Service Unavailable")
-        succeeded = self.Response(200, "OK")
-
-        stream, connections, sleep = self.run_open_gemini_stream(
-            [failed, succeeded]
-        )
-
-        self.assertIs(stream._response, succeeded)
-        self.assertTrue(connections[0].closed)
-        self.assertFalse(connections[1].closed)
-        sleep.assert_called_once_with(0.3)
-        stream.close()
-
-    def test_stops_after_one_transient_gemini_server_retry(self):
-        responses = [
-            self.Response(503, "Service Unavailable"),
-            self.Response(503, "Service Unavailable"),
-        ]
-        connections = [self.Connection(response) for response in responses]
-        handler = unittest.mock.Mock()
-        handler.take_gemini_connection.side_effect = connections
-
-        with patch("server.time.sleep"), patch("builtins.print"):
-            with self.assertRaises(HTTPError) as raised:
-                server.ChatHandler.open_gemini_stream(
-                    handler, b"{}", {}, {"model": "gemini-3.1-flash-lite"}
-                )
-
-        self.assertEqual(raised.exception.code, 503)
-        self.assertEqual(handler.take_gemini_connection.call_count, 2)
-        self.assertTrue(all(connection.closed for connection in connections))
-        raised.exception.close()
-
-
 class ChatApiTests(unittest.TestCase):
     def setUp(self):
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.ChatHandler)
@@ -602,39 +530,6 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn('"phase":"model_validation"', diagnostic)
         self.assertIn('"error_type":"ConfigurationError"', diagnostic)
 
-    def test_uses_gemini_3_1_flash_lite_by_default(self):
-        self.mock_urlopen.return_value = BytesIO(
-            (
-                'event: step.delta\n'
-                'data: {"event_type":"step.delta","delta":{"type":"text","text":"إجابة"}}\n\n'
-                'event: interaction.completed\n'
-                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_model"}}\n\n'
-            ).encode()
-        )
-        with patch.dict(server.os.environ):
-            server.os.environ.pop("GEMINI_MODEL", None)
-            status, _ = self.post({"message": "سؤال"})
-
-        self.assertEqual(status, 200)
-        sent = json.loads(self.mock_urlopen.call_args.args[0].data)
-        self.assertEqual(sent["model"], "gemini-3.1-flash-lite")
-
-    def test_maps_gemini_3_1_pro_environment_alias_to_preview(self):
-        self.mock_urlopen.return_value = BytesIO(
-            (
-                'event: step.delta\n'
-                'data: {"event_type":"step.delta","delta":{"type":"text","text":"إجابة"}}\n\n'
-                'event: interaction.completed\n'
-                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_model_alias"}}\n\n'
-            ).encode()
-        )
-        with patch.dict(server.os.environ, {"GEMINI_MODEL": "gemini-3.1-pro"}):
-            status, _ = self.post({"message": "السلام عليكم"})
-
-        self.assertEqual(status, 200)
-        sent = json.loads(self.mock_urlopen.call_args.args[0].data)
-        self.assertEqual(sent["model"], "gemini-3.1-pro-preview")
-
     def test_protects_chat_api_without_a_session(self):
         status, result = self.post(
             {"message": "مرحبا"}, authorized=False
@@ -1088,10 +983,6 @@ class ChatApiTests(unittest.TestCase):
     def test_assistant_identity_and_developer_questions_are_explicit(self):
         self.assertTrue(server.user_asks_assistant_identity("شو اسمك؟"))
         self.assertTrue(server.user_asks_assistant_identity("مين طورك؟"))
-        self.assertTrue(
-            server.user_asks_assistant_identity("مين جميل اسماعيل ابو حماد؟")
-        )
-        self.assertTrue(server.user_asks_assistant_identity("من هو جميل أبو حماد"))
         self.assertFalse(server.user_asks_assistant_identity("اشرح قانون نيوتن"))
         instruction = server.conversation_system_instruction(
             first_reply=False,
@@ -1100,8 +991,7 @@ class ChatApiTests(unittest.TestCase):
             asks_identity=True,
         )
         self.assertIn("أنا فهيم، مساعد ذكي للطلاب في مدرسة خريبة السوق", instruction)
-        self.assertIn("جميل إسماعيل أبو حماد هو المطور الذي صنعني", instruction)
-        self.assertIn("مين جميل إسماعيل أبو حماد", instruction)
+        self.assertIn("صنعني المطور جميل إسماعيل أبو حماد", instruction)
 
     def test_detects_greetings_only_at_the_start_of_the_message(self):
         self.assertTrue(server.user_starts_with_greeting("مرحبا، عندي سؤال"))
