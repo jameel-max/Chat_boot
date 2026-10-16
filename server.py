@@ -87,6 +87,8 @@ _database_lock = threading.Lock()
 SYSTEM_INSTRUCTION = " ".join(
     (
         "أنت فهيم، مساعد ذكي لطلاب مدرسة خريبة السوق الثانوية الثانية للبنين.",
+        "أجب مباشرة وبإيجاز (فقرة إلى ثلاث)، ولا تُطل إلا إذا طلب الطالب الشرح.",
+        "في الرياضيات والعلوم اكتب الخطوات مرتبة وقصيرة والمعادلات بـ LaTeX.",
         "لا تعرّف بنفسك إلا إذا سُئلت.",
         "استخدم تنسيق Markdown بحدّه الأدنى، وقوائم أو جداول فقط عند الحاجة الفعلية.",
     )
@@ -3120,8 +3122,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
         parts = urlsplit(API_URL)
         path = parts.path + (f"?{parts.query}" if parts.query else "")
         thinking_retry_used = False
-        transient_retry_used = False
-        for _ in range(3):
+        transient_attempts = 0
+        fallback_used = False
+        while True:
             connection = self.take_gemini_connection()
             try:
                 connection.request(
@@ -3140,13 +3143,13 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 return GeminiStream(connection, response)
             error_body = response.read()
             connection.close()
+
             if (
                 not thinking_retry_used
                 and response.status == 400
                 and request_payload
                 and "generation_config" in request_payload
             ):
-                # النموذج رفض إعداد التفكير: نعيد المحاولة مرة واحدة بدونه.
                 print("[PERF] رفض Gemini thinking_level؛ إعادة المحاولة بدونه", flush=True)
                 request_payload = {
                     key: value
@@ -3158,22 +3161,39 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 ).encode("utf-8")
                 thinking_retry_used = True
                 continue
-            if (
-                not transient_retry_used
-                and (
-                    response.status in {408, 425}
-                    or 500 <= response.status < 600
-                )
-            ):
+
+            transient = response.status in {408, 425, 429} or 500 <= response.status < 600
+            if transient and transient_attempts < len(TRANSIENT_RETRY_DELAYS):
                 log_chat_diagnostic(
                     "gemini_retry",
                     "HTTPError",
                     response.reason,
                     upstream_http_status=response.status,
                 )
-                transient_retry_used = True
-                time.sleep(0.3)
+                time.sleep(TRANSIENT_RETRY_DELAYS[transient_attempts])
+                transient_attempts += 1
                 continue
+
+            if (
+                transient
+                and not fallback_used
+                and FALLBACK_MODEL
+                and request_payload
+                and request_payload.get("model") != FALLBACK_MODEL
+            ):
+                log_chat_diagnostic(
+                    "gemini_fallback",
+                    "HTTPError",
+                    "Switching to fallback model.",
+                    upstream_http_status=response.status,
+                )
+                fallback_used = True
+                request_payload = {**request_payload, "model": FALLBACK_MODEL}
+                request_data = json.dumps(
+                    request_payload, ensure_ascii=False
+                ).encode("utf-8")
+                continue
+
             raise HTTPError(
                 API_URL,
                 response.status,
