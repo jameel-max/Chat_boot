@@ -530,7 +530,7 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn('"phase":"model_validation"', diagnostic)
         self.assertIn('"error_type":"ConfigurationError"', diagnostic)
 
-    def test_uses_gemini_3_1_pro_preview_by_default(self):
+    def test_uses_gemini_3_1_flash_lite_by_default(self):
         self.mock_urlopen.return_value = BytesIO(
             (
                 'event: step.delta\n'
@@ -545,7 +545,7 @@ class ChatApiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         sent = json.loads(self.mock_urlopen.call_args.args[0].data)
-        self.assertEqual(sent["model"], "gemini-3.1-pro-preview")
+        self.assertEqual(sent["model"], "gemini-3.1-flash-lite")
 
     def test_maps_gemini_3_1_pro_environment_alias_to_preview(self):
         self.mock_urlopen.return_value = BytesIO(
@@ -631,7 +631,7 @@ class ChatApiTests(unittest.TestCase):
             "https://generativelanguage.googleapis.com/v1beta/interactions",
         )
         sent = json.loads(request.data)
-        self.assertEqual(sent["model"], "gemini-3.1-pro-preview")
+        self.assertEqual(sent["model"], "gemini-3.1-flash-lite")
         self.assertIn(server.SYSTEM_INSTRUCTION, sent["system_instruction"])
         self.assertIn("لا تبدأ بتحية", sent["system_instruction"])
         self.assertIn("اسأله مرة واحدة فقط", sent["system_instruction"])

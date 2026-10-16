@@ -584,7 +584,7 @@ STATIC_GZIP_LOCK = threading.Lock()
 GEMINI_THINKING_LEVELS = {"minimal", "low", "medium", "high"}
 
 def gemini_model():
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview").strip()
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
     if model == "gemini-3.1-pro":
         return "gemini-3.1-pro-preview"
     return model
