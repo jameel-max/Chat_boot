@@ -3125,7 +3125,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
     def open_gemini_stream(self, request_data, request_headers, request_payload=None):
         parts = urlsplit(API_URL)
         path = parts.path + (f"?{parts.query}" if parts.query else "")
-        for attempt in (0, 1):
+        thinking_retry_used = False
+        transient_retry_used = False
+        for _ in range(3):
             connection = self.take_gemini_connection()
             try:
                 connection.request(
@@ -3139,13 +3141,13 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 connection.close()
                 raise URLError(error) from error
             if response.status < 400:
-                if attempt == 1:
+                if thinking_retry_used:
                     ChatHandler.thinking_rejected = True
                 return GeminiStream(connection, response)
             error_body = response.read()
             connection.close()
             if (
-                attempt == 0
+                not thinking_retry_used
                 and response.status == 400
                 and request_payload
                 and "generation_config" in request_payload
@@ -3160,6 +3162,23 @@ class ChatHandler(SimpleHTTPRequestHandler):
                 request_data = json.dumps(
                     request_payload, ensure_ascii=False
                 ).encode("utf-8")
+                thinking_retry_used = True
+                continue
+            if (
+                not transient_retry_used
+                and (
+                    response.status in {408, 425}
+                    or 500 <= response.status < 600
+                )
+            ):
+                log_chat_diagnostic(
+                    "gemini_retry",
+                    "HTTPError",
+                    response.reason,
+                    upstream_http_status=response.status,
+                )
+                transient_retry_used = True
+                time.sleep(0.3)
                 continue
             raise HTTPError(
                 API_URL,

@@ -15,6 +15,78 @@ from urllib.request import Request, urlopen
 import server
 
 
+class GeminiStreamRetryTests(unittest.TestCase):
+    class Response:
+        def __init__(self, status, reason):
+            self.status = status
+            self.reason = reason
+            self.msg = {}
+
+        def read(self):
+            return b"upstream error"
+
+        def close(self):
+            pass
+
+    class Connection:
+        def __init__(self, response):
+            self.response = response
+            self.closed = False
+
+        def request(self, method, path, body, headers):
+            self.request_data = body
+
+        def getresponse(self):
+            return self.response
+
+        def close(self):
+            self.closed = True
+
+    def run_open_gemini_stream(self, responses):
+        connections = [self.Connection(response) for response in responses]
+        handler = unittest.mock.Mock()
+        handler.take_gemini_connection.side_effect = connections
+        with patch("server.time.sleep") as sleep, patch("builtins.print"):
+            stream = server.ChatHandler.open_gemini_stream(
+                handler, b"{}", {}, {"model": "gemini-3.1-flash-lite"}
+            )
+        return stream, connections, sleep
+
+    def test_retries_transient_gemini_server_error_once(self):
+        failed = self.Response(503, "Service Unavailable")
+        succeeded = self.Response(200, "OK")
+
+        stream, connections, sleep = self.run_open_gemini_stream(
+            [failed, succeeded]
+        )
+
+        self.assertIs(stream._response, succeeded)
+        self.assertTrue(connections[0].closed)
+        self.assertFalse(connections[1].closed)
+        sleep.assert_called_once_with(0.3)
+        stream.close()
+
+    def test_stops_after_one_transient_gemini_server_retry(self):
+        responses = [
+            self.Response(503, "Service Unavailable"),
+            self.Response(503, "Service Unavailable"),
+        ]
+        connections = [self.Connection(response) for response in responses]
+        handler = unittest.mock.Mock()
+        handler.take_gemini_connection.side_effect = connections
+
+        with patch("server.time.sleep"), patch("builtins.print"):
+            with self.assertRaises(HTTPError) as raised:
+                server.ChatHandler.open_gemini_stream(
+                    handler, b"{}", {}, {"model": "gemini-3.1-flash-lite"}
+                )
+
+        self.assertEqual(raised.exception.code, 503)
+        self.assertEqual(handler.take_gemini_connection.call_count, 2)
+        self.assertTrue(all(connection.closed for connection in connections))
+        raised.exception.close()
+
+
 class ChatApiTests(unittest.TestCase):
     def setUp(self):
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.ChatHandler)
