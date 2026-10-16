@@ -740,6 +740,46 @@ class ChatApiTests(unittest.TestCase):
             ["user", "assistant"],
         )
 
+    def test_retry_replays_image_using_fingerprint_without_saving_image(self):
+        request_id = "b" * 32
+        self.mock_urlopen.return_value = BytesIO(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"إجابة الصورة"}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_image_retry"}}\n\n'
+            ).encode()
+        )
+        image = base64.b64encode(b"one-image").decode()
+        payload = {
+            "message": "ما في الصورة؟",
+            "image": {"mimeType": "image/png", "data": image},
+            "requestId": request_id,
+        }
+        status, first = self.post(payload)
+        self.assertEqual(status, 200)
+        message = server.database.get_conversation(
+            self.user["id"], first["conversationId"]
+        )[1][0]
+        self.assertIsNone(message["image_data"])
+
+        self.mock_urlopen.reset_mock()
+        status, replay = self.post({**payload, "retryRequest": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(replay["answer"], first["answer"])
+        self.mock_urlopen.assert_not_called()
+
+        different_image = base64.b64encode(b"different-image").decode()
+        status, conflict = self.post(
+            {
+                **payload,
+                "image": {"mimeType": "image/png", "data": different_image},
+                "retryRequest": True,
+            }
+        )
+        self.assertEqual(status, 409)
+        self.assertIn("مرجع الطلب مستخدم", conflict["error"])
+
     def test_save_failure_keeps_streamed_answer_and_does_not_persist_partial_pair(self):
         self.mock_urlopen.return_value = BytesIO(
             (
@@ -812,7 +852,7 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn("فهيم: " + schedule, transcript)
         self.assertIn("نظم المعلومات بشكل جدول", transcript)
 
-    def test_reloads_referenced_previous_image_but_skips_unrelated_images(self):
+    def test_previous_images_are_not_reloaded_from_conversation_history(self):
         previous_image = b"previous-png-image"
         previous = server.database.prepare_user_message(
             self.user["id"],
@@ -845,10 +885,7 @@ class ChatApiTests(unittest.TestCase):
         prior_images = [
             part for part in sent["input"] if part.get("type") == "image"
         ]
-        self.assertEqual(len(prior_images), 1)
-        self.assertEqual(
-            base64.b64decode(prior_images[0]["data"]), previous_image
-        )
+        self.assertEqual(prior_images, [])
 
         self.mock_urlopen.return_value = BytesIO(stream)
         status, _ = self.post(
@@ -1219,6 +1256,8 @@ class ChatApiTests(unittest.TestCase):
             self.user["id"], result["conversationId"]
         )
         self.assertIn("lesson.pdf", detail[1][0]["content"])
+        self.assertNotIn(document_data, detail[1][0]["content"])
+        self.assertIsNone(detail[1][0]["image_data"])
 
     def test_rejects_unsupported_document_type(self):
         status, result = self.post(
@@ -1529,7 +1568,7 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual(detail["messages"][1]["content"], "إجابة محفوظة")
         self.assertEqual(response["conversationId"], record["id"])
 
-    def test_persists_attached_image_for_history(self):
+    def test_does_not_persist_attached_image_for_history(self):
         self.mock_urlopen.return_value = BytesIO(
             (
                 'event: step.delta\n'
@@ -1552,7 +1591,13 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(
             detail["messages"][0]["image"],
-            {"mimeType": "image/png", "data": image},
+            None,
+        )
+        self.assertIn("مرفق صورة (غير محفوظة)", detail["messages"][0]["content"])
+        self.assertIsNone(
+            server.database.get_conversation(
+                self.user["id"], response["conversationId"]
+            )[1][0]["image_data"]
         )
 
     def test_can_rename_and_delete_only_owned_conversations(self):
@@ -2431,7 +2476,7 @@ class DatabaseContextTests(unittest.TestCase):
             )
         self.assertEqual(selected, [])
 
-    def test_ordered_history_images_and_ownership_survive_database_reopen(self):
+    def test_conversation_history_does_not_persist_images(self):
         with tempfile.TemporaryDirectory() as folder:
             database_path = Path(folder) / "conversation.sqlite3"
             database = server.Database(database_path)
@@ -2470,7 +2515,7 @@ class DatabaseContextTests(unittest.TestCase):
             self.assertEqual(
                 [message["content"] for message in messages],
                 [
-                    "حل السؤال في الصورة",
+                    "حل السؤال في الصورة\nمرفق صورة (غير محفوظة)",
                     "أحتاج قراءة الأرقام أولًا.",
                     "الرقم هو ٥",
                     "إذن الحل هو ١٠.",
@@ -2483,10 +2528,7 @@ class DatabaseContextTests(unittest.TestCase):
             images = reopened.get_conversation_images(
                 user["id"], first["id"], [first["message_id"]]
             )
-            self.assertEqual(
-                images[first["message_id"]]["image_data"],
-                b"persisted-image-bytes",
-            )
+            self.assertEqual(images, {})
 
             other_user = reopened.register_user(
                 "other@example.com", "correct-horse-battery"
@@ -2500,6 +2542,32 @@ class DatabaseContextTests(unittest.TestCase):
                 ),
                 {},
             )
+
+    def test_database_startup_removes_legacy_image_data(self):
+        with tempfile.TemporaryDirectory() as folder:
+            database_path = Path(folder) / "legacy-images.sqlite3"
+            database = server.Database(database_path)
+            user = database.register_user(
+                "legacy-image@example.com", "correct-horse-battery"
+            )
+            message = database.prepare_user_message(
+                user["id"],
+                None,
+                "سؤال مصور",
+                "حل السؤال",
+                "image/png",
+                b"legacy-image-bytes",
+            )
+            with database.connect() as connection:
+                connection.execute(
+                    "UPDATE messages SET image_data = ? WHERE id = ?",
+                    (b"legacy-image-bytes", message["message_id"]),
+                )
+
+            reopened = server.Database(database_path)
+            conversation = reopened.get_conversation(user["id"], message["id"])
+            self.assertIsNone(conversation[1][0]["image_data"])
+            self.assertIn("مرفق صورة (غير محفوظة)", conversation[1][0]["content"])
 
 
 if __name__ == "__main__":

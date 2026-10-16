@@ -1,5 +1,6 @@
 import base64
 import binascii
+import hashlib
 import gzip
 import http.client
 import io
@@ -1532,6 +1533,11 @@ class ChatHandler(SimpleHTTPRequestHandler):
             )
 
         file_name = None
+        image_hash = (
+            hashlib.sha256(image_bytes).hexdigest()
+            if image is not None
+            else None
+        )
         if attachment is not None:
             if image is not None:
                 self.send_json({"error": "أرفق صورة أو ملفًا واحدًا في كل مرة."}, 400)
@@ -1575,6 +1581,12 @@ class ChatHandler(SimpleHTTPRequestHandler):
 
         saved_message = message.strip()
         title_message = saved_message
+        if image is not None:
+            saved_message = "\n".join(
+                part
+                for part in (saved_message, "مرفق صورة (غير محفوظة)")
+                if part
+            )
         if file_name:
             saved_message = "\n".join(
                 part for part in (saved_message, f"مرفق ملف: {file_name}") if part
@@ -1596,8 +1608,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                     completed_exchange["user_content"] != saved_message
                     or completed_exchange["image_mime"]
                     != (mime_type if image is not None else None)
-                    or completed_exchange["image_data"]
-                    != (image_bytes if image is not None else None)
+                    or completed_exchange["image_hash"] != image_hash
                 ):
                     self.send_json(
                         {"error": "مرجع الطلب مستخدم لرسالة مختلفة."}, 409
@@ -1683,7 +1694,8 @@ class ChatHandler(SimpleHTTPRequestHandler):
             "user_id": user["id"],
             "user_content": saved_message,
             "image_mime": mime_type if image is not None else None,
-            "image_data": image_bytes if image is not None else None,
+            "image_data": None,
+            "image_hash": image_hash,
             "idempotency_key": idempotency_key,
             "create_conversation": conversation_id is None,
             "grade": student_grade,
@@ -2962,6 +2974,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
                         create_conversation=conversation[
                             "create_conversation"
                         ],
+                        image_hash=conversation.get("image_hash"),
                     )
                     if not result:
                         raise RuntimeError("Conversation disappeared before save.")

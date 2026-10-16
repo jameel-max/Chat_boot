@@ -170,6 +170,7 @@ class Database:
                     content TEXT NOT NULL,
                     image_mime TEXT,
                     image_data BLOB,
+                    image_hash TEXT,
                     idempotency_key TEXT,
                     created_at INTEGER NOT NULL
                 );
@@ -237,6 +238,12 @@ class Database:
                     """
                     ALTER TABLE messages
                     ADD COLUMN IF NOT EXISTS idempotency_key TEXT
+                    """
+                )
+                connection.execute(
+                    """
+                    ALTER TABLE messages
+                    ADD COLUMN IF NOT EXISTS image_hash TEXT
                     """
                 )
                 connection.execute(
@@ -375,6 +382,14 @@ class Database:
                         """
                     )
 
+                if "image_hash" not in message_columns:
+                    connection.execute(
+                        """
+                        ALTER TABLE messages
+                        ADD COLUMN image_hash TEXT
+                        """
+                    )
+
                 connection.execute(
                     """
                     CREATE UNIQUE INDEX IF NOT EXISTS
@@ -464,6 +479,27 @@ class Database:
                     )
 
                 seen.add(candidate.casefold())
+
+            legacy_images_removed = connection.execute(
+                """
+                UPDATE messages
+                SET content = CASE
+                        WHEN content LIKE '%مرفق صورة (غير محفوظة)%'
+                            THEN content
+                        ELSE content || '\nمرفق صورة (غير محفوظة)'
+                    END,
+                    image_data = NULL
+                WHERE image_data IS NOT NULL
+                """
+            ).rowcount > 0
+
+        if legacy_images_removed and not self.is_postgres:
+            connection = sqlite3.connect(self.path, timeout=10)
+            try:
+                connection.execute("PRAGMA busy_timeout = 10000")
+                connection.execute("VACUUM")
+            finally:
+                connection.close()
 
     @contextmanager
     def connect(self):
@@ -1753,7 +1789,7 @@ class Database:
                 conversations.title,
                 user_message.content AS user_content,
                 user_message.image_mime,
-                user_message.image_data,
+                user_message.image_hash,
                 assistant_message.content AS assistant_content
             FROM messages AS user_message
             JOIN conversations
@@ -1792,8 +1828,11 @@ class Database:
         grade=None,
         grade_question_asked=False,
         create_conversation=False,
+        image_hash=None,
     ):
         now = int(time.time())
+        if image_hash is None and image_data is not None:
+            image_hash = hashlib.sha256(image_data).hexdigest()
         try:
             with self.connect() as connection:
                 existing = self._find_completed_chat_exchange(
@@ -1803,7 +1842,7 @@ class Database:
                     if (
                         existing["user_content"] != user_content
                         or existing["image_mime"] != image_mime
-                        or existing["image_data"] != image_data
+                        or existing["image_hash"] != image_hash
                     ):
                         raise ValueError(
                             "An idempotency key cannot be reused for another request."
@@ -1872,16 +1911,17 @@ class Database:
                             content,
                             image_mime,
                             image_data,
+                            image_hash,
                             idempotency_key,
                             created_at
                         )
-                    VALUES (?, 'user', ?, ?, ?, ?, ?)
+                    VALUES (?, 'user', ?, ?, NULL, ?, ?, ?)
                     """,
                     (
                         conversation_id,
                         user_content,
                         image_mime,
-                        image_data,
+                        image_hash,
                         idempotency_key,
                         now,
                     ),
@@ -1925,7 +1965,7 @@ class Database:
                 if (
                     duplicate["user_content"] != user_content
                     or duplicate["image_mime"] != image_mime
-                    or duplicate["image_data"] != image_data
+                    or duplicate["image_hash"] != image_hash
                 ):
                     raise ValueError(
                         "An idempotency key cannot be reused for another request."
@@ -2187,7 +2227,18 @@ class Database:
         image_data,
     ):
 
+        if image_mime and "مرفق صورة (غير محفوظة)" not in content:
+            content = "\n".join(
+                part
+                for part in (content, "مرفق صورة (غير محفوظة)")
+                if part
+            )
         now = int(time.time())
+        image_hash = (
+            hashlib.sha256(image_data).hexdigest()
+            if image_data is not None
+            else None
+        )
 
         with self.connect() as connection:
 
@@ -2315,16 +2366,17 @@ class Database:
                         content,
                         image_mime,
                         image_data,
+                        image_hash,
                         created_at
                     )
-                VALUES (?, 'user', ?, ?, ?, ?)
+                VALUES (?, 'user', ?, ?, NULL, ?, ?)
                 RETURNING id
                 """,
                 (
                     conversation_id,
                     content,
                     image_mime,
-                    image_data,
+                    image_hash,
                     now,
                 ),
             )
