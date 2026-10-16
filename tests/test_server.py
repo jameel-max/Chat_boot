@@ -530,7 +530,7 @@ class ChatApiTests(unittest.TestCase):
         self.assertIn('"phase":"model_validation"', diagnostic)
         self.assertIn('"error_type":"ConfigurationError"', diagnostic)
 
-    def test_uses_gemini_3_1_pro_by_default(self):
+    def test_uses_gemini_3_1_pro_preview_by_default(self):
         self.mock_urlopen.return_value = BytesIO(
             (
                 'event: step.delta\n'
@@ -545,7 +545,23 @@ class ChatApiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         sent = json.loads(self.mock_urlopen.call_args.args[0].data)
-        self.assertEqual(sent["model"], "gemini-3.1-pro")
+        self.assertEqual(sent["model"], "gemini-3.1-pro-preview")
+
+    def test_maps_gemini_3_1_pro_environment_alias_to_preview(self):
+        self.mock_urlopen.return_value = BytesIO(
+            (
+                'event: step.delta\n'
+                'data: {"event_type":"step.delta","delta":{"type":"text","text":"إجابة"}}\n\n'
+                'event: interaction.completed\n'
+                'data: {"event_type":"interaction.completed","interaction":{"id":"v1_model_alias"}}\n\n'
+            ).encode()
+        )
+        with patch.dict(server.os.environ, {"GEMINI_MODEL": "gemini-3.1-pro"}):
+            status, _ = self.post({"message": "السلام عليكم"})
+
+        self.assertEqual(status, 200)
+        sent = json.loads(self.mock_urlopen.call_args.args[0].data)
+        self.assertEqual(sent["model"], "gemini-3.1-pro-preview")
 
     def test_protects_chat_api_without_a_session(self):
         status, result = self.post(
@@ -615,7 +631,7 @@ class ChatApiTests(unittest.TestCase):
             "https://generativelanguage.googleapis.com/v1beta/interactions",
         )
         sent = json.loads(request.data)
-        self.assertEqual(sent["model"], "gemini-3.1-pro")
+        self.assertEqual(sent["model"], "gemini-3.1-pro-preview")
         self.assertIn(server.SYSTEM_INSTRUCTION, sent["system_instruction"])
         self.assertIn("لا تبدأ بتحية", sent["system_instruction"])
         self.assertIn("اسأله مرة واحدة فقط", sent["system_instruction"])
